@@ -1,0 +1,144 @@
+{
+  "project_title": "BuildSpec AI - Construction Blueprint & Spatial Dimension Intelligence",
+  "app_type": "saas_app / tool_dashboard",
+  "theme": "dark_slate_precision",
+  "archetype": "THE PERFORMANCE PRO / ARCHITECTURAL PRECISION",
+  "instructions_to_main_agent": [
+    "Build a high-precision, technical construction blueprint scanner & spatial dimension AI SaaS dashboard.",
+    "Implement the layout with a collapsible Project History Sidebar (left), a central Interactive Blueprint Canvas Viewer with zoom/pan/bounding box overlays (center-top), a Structured Dimension Table with tabs for Rooms, Walls, Openings & CSV Export (center-bottom), and an AI Spatial Analysis Chat Q&A panel (right).",
+    "Use JavaScript (.js/.jsx) files (NOT TypeScript .tsx). Import Lucide React icons for UI controls.",
+    "Add explicit data-testid attributes to ALL interactive controls, buttons, tables, file dropzones, and input fields following kebab-case convention (e.g., data-testid='upload-blueprint-button').",
+    "Ensure contrast compliance with APCA/WCAG standards: dark obsidian slate `#0B0F17` background with warm amber `#F59E0B` and architectural cyan `#06B6D4` accents.",
+    "Do NOT use pure #000000 or default bright blue gradients. Use matte dark graphite `#111827` and slate `#1E293B` containers with 1px border strokes `#334155`.",
+    "Provide preset sample blueprints (e.g. Modern Villa Floorplan, Commercial Office Suite, Residential 2-Story) so the user can test instant analysis without uploading files."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Never center-align the main App container text. Maintain structured left-aligned technical readability.",
+    "Use generous padding (p-6, p-8) inside card containers with explicit borders to avoid text truncation.",
+    "Do not apply global transition: all. Use targeted transitions on opacity, background-color, and border-color.",
+    "Do NOT use generic AI emojis (🤖, 🧠, 💡) for icons. Use clean Lucide icons (e.g., Ruler, Layers, Scale, FileSpreadsheet, Bot, Send, Eye, ZoomIn, Download).",
+    "All toasts must use the Sonner library (toast.success, toast.error, toast.info) with explicit dark custom styling.",
+    "Ensure every grid element is a direct child of the grid container or uses subgrid styling."
+  ],
+  "typography": {
+    "font_family_headings": "Outfit, Space Grotesk, sans-serif",
+    "font_family_body": "Inter, system-ui, sans-serif",
+    "font_family_mono": "JetBrains Mono, Fira Code, monospace",
+    "heading_h1": "text-3xl sm:text-4xl font-bold tracking-tight text-slate-100",
+    "heading_h2": "text-xl sm:text-2xl font-semibold tracking-tight text-slate-100",
+    "heading_h3": "text-lg font-medium text-slate-200",
+    "body_text": "text-sm text-slate-300 leading-relaxed",
+    "code_dimension_text": "font-mono text-xs text-amber-400 font-medium tracking-wide"
+  },
+  "colors": {
+    "background": "#0B0F17",
+    "surface_primary": "#111827",
+    "surface_secondary": "#1E293B",
+    "surface_hover": "#334155",
+    "border_subtle": "#1E293B",
+    "border_strong": "#334155",
+    "border_focus": "#06B6D4",
+    "accent_amber": "#F59E0B",
+    "accent_cyan": "#06B6D4",
+    "accent_emerald": "#10B981",
+    "text_primary": "#F8FAFC",
+    "text_secondary": "#94A3B8",
+    "text_muted": "#64748B",
+    "overlay_scrim": "rgba(11, 15, 23, 0.85)"
+  },
+  "layout_structure": {
+    "header": "Sticky z-40 bg-[#0B0F17]/90 backdrop-blur-md border-b border-slate-800 px-6 py-3 flex items-center justify-between",
+    "main_grid": "grid grid-cols-1 lg:grid-cols-12 gap-4 p-4 min-h-[calc(100vh-65px)]",
+    "sidebar": "col-span-12 lg:col-span-2 bg-[#111827] border border-slate-800 rounded-xl p-4 flex flex-col justify-between",
+    "center_stage": "col-span-12 lg:col-span-7 flex flex-col gap-4",
+    "chat_panel": "col-span-12 lg:col-span-3 bg-[#111827] border border-slate-800 rounded-xl flex flex-col h-[780px]"
+  },
+  "components_and_features": [
+    {
+      "component_name": "SidebarProjectHistory",
+      "description": "Lists saved blueprint projects with scale info, date, and status badges. Allows switching active blueprints and creating new project sessions.",
+      "data_testids": [
+        "project-history-sidebar",
+        "new-project-button",
+        "project-item-card",
+        "project-search-input"
+      ]
+    },
+    {
+      "component_name": "BlueprintUploader",
+      "description": "Drag & drop upload zone supporting Blueprint Images (PNG/JPG) and PDFs with AI vision model selection (Gemini 3.1 Pro vs Gemini 2.5 Flash), scale setting (e.g. 1/4\" = 1'0\"), and sample blueprints loader.",
+      "data_testids": [
+        "blueprint-dropzone",
+        "file-upload-input",
+        "model-selector-dropdown",
+        "sample-blueprint-select",
+        "analyze-blueprint-button"
+      ]
+    },
+    {
+      "component_name": "InteractiveBlueprintViewer",
+      "description": "Interactive Canvas container with Zoom (In/Out/Reset), Pan controls, Calibrate Scale tool, Layer Toggle (Rooms, Walls, Windows/Doors Bounding Boxes, Annotations), and full-screen expansion.",
+      "data_testids": [
+        "blueprint-canvas-viewer",
+        "zoom-in-button",
+        "zoom-out-button",
+        "zoom-reset-button",
+        "toggle-layer-rooms",
+        "toggle-layer-walls",
+        "toggle-layer-openings"
+      ]
+    },
+    {
+      "component_name": "StructuredDimensionTable",
+      "description": "Tabs for Rooms (Name, Dimensions, Area sq ft/m², Height), Walls (Type, Length, Thickness, Material), and Openings (Doors/Windows, Width, Height, Header). Includes CSV export button and search/filter bar.",
+      "data_testids": [
+        "dimension-table-container",
+        "tab-rooms",
+        "tab-walls",
+        "tab-openings",
+        "export-csv-button",
+        "table-search-input",
+        "dimension-row-item"
+      ]
+    },
+    {
+      "component_name": "AIChatAssistantPanel",
+      "description": "Spatial AI Q&A assistant for asking natural language questions about blueprint dimensions, load-bearing walls, clearance codes, material estimates, and total square footage with instant citation highlights.",
+      "data_testids": [
+        "chat-panel-container",
+        "chat-message-list",
+        "chat-input-textarea",
+        "chat-send-button",
+        "suggested-prompt-chip"
+      ]
+    }
+  ],
+  "image_urls": [
+    {
+      "category": "sample_blueprints",
+      "description": "Architectural floorplan blueprint with detailed dimensions and layout",
+      "url": "https://images.unsplash.com/photo-1721244654394-36a7bc2da288?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODl8MHwxfHNlYXJjaHw0fHxhcmNoaXRlY3QlMjBibHVlcHJpbnQlMjBmbG9vciUyMHBsYW4lMjBlbmdpbmVlcmluZ3xlbnwwfHx8fDE3OTE0NzYzMDh8MA&ixlib=rb-4.1.0&q=85"
+    },
+    {
+      "category": "sample_blueprints",
+      "description": "Elevation building blueprint with windows and structural columns",
+      "url": "https://images.unsplash.com/photo-1721244654392-9c912a6eb236?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzd8MHwxfHNlYXJjaHwyfHxjb25zdHJ1Y3Rpb24lMjBibHVlcHJpbnQlMjBhcmNoaXRlY3R1cmUlMjBkcmF3aW5nfGVufDB8fHx8MTc5MTQ3NjMwOHww&ixlib=rb-4.1.0&q=85"
+    },
+    {
+      "category": "sample_blueprints",
+      "description": "Historic facade and section blueprint drawing",
+      "url": "https://images.unsplash.com/photo-1712696779652-dfca8766c5f8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzd8MHwxfHNlYXJjaHw0fHxjb25zdHJ1Y3Rpb24lMjBibHVlcHJpbnQlMjBhcmNoaXRlY3R1cmUlMjBkcmF3aW5nfGVufDB8fHx8MTc5MTQ3NjMwOHww&ixlib=rb-4.1.0&q=85"
+    }
+  ],
+  "motion_and_interactions": {
+    "hover": "hover:bg-slate-800 hover:border-slate-700 transition-colors duration-150",
+    "active_card": "border-cyan-500/50 bg-slate-900/80 shadow-[0_0_15px_rgba(6,182,212,0.15)]",
+    "loading_skeleton": "animate-pulse bg-slate-800/60 rounded",
+    "button_press": "active:scale-95 transition-transform duration-100"
+  },
+  "accessibility": {
+    "contrast_ratio": "APCA 75+ / WCAG AA 4.5:1 minimum on dark surface",
+    "keyboard_nav": "Full tab index focus rings using focus:outline-none focus:ring-2 focus:ring-cyan-500",
+    "data_attributes": "All testable components have data-testid attributes"
+  }
+}
