@@ -13,12 +13,18 @@ export const fetchPageImage = (id, idx) =>
 
 const CHUNK = 4 * 1024 * 1024;
 
+const putChunk = async (url, blob, tries = 4) => {
+  for (let i = 0; ; i++) {
+    try { return await axios.put(url, blob, { headers: { "Content-Type": "application/octet-stream" } }); }
+    catch (e) { if (i >= tries - 1 || (e.response && e.response.status < 500)) throw e; await new Promise((r) => setTimeout(r, 1000 * 2 ** i)); }
+  }
+};
+
 export async function uploadPlans(file, name, scaleHint, onProgress) {
   const { upload_id } = (await axios.post(`${API}/uploads/init`, { filename: file.name, size: file.size })).data;
   const total = Math.ceil(file.size / CHUNK);
   for (let n = 0; n < total; n++) {
-    const blob = file.slice(n * CHUNK, (n + 1) * CHUNK);
-    await axios.put(`${API}/uploads/${upload_id}/chunk/${n}`, blob, { headers: { "Content-Type": "application/octet-stream" } });
+    await putChunk(`${API}/uploads/${upload_id}/chunk/${n}`, file.slice(n * CHUNK, (n + 1) * CHUNK));
     onProgress(Math.round(((n + 1) / total) * 100));
   }
   return (await axios.post(`${API}/uploads/${upload_id}/complete`, { name, scale_hint: scaleHint })).data;

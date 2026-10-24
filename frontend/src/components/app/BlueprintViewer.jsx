@@ -52,9 +52,10 @@ export const BlueprintViewer = ({ project, page, onChange }) => {
 
   useEffect(() => {
     let u;
+    let alive = true;
     setUrl(null); setZoom(1); setPan({ x: 0, y: 0 });
-    fetchPageImage(project.id, page.index).then((b) => { u = URL.createObjectURL(b); setUrl(u); });
-    return () => u && URL.revokeObjectURL(u);
+    fetchPageImage(project.id, page.index).then((b) => { if (!alive) return; u = URL.createObjectURL(b); setUrl(u); }).catch(() => alive && toast.error("Could not load this sheet image"));
+    return () => { alive = false; if (u) URL.revokeObjectURL(u); };
   }, [project.id, page.index]);
 
   const onDown = (e) => { drag.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }; };

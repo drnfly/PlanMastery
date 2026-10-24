@@ -60,7 +60,7 @@ const Scene = ({ url, model }) => {
       <directionalLight position={[F, F * 1.5, F * 0.6]} intensity={1.1} />
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[W, H]} />
-        <meshStandardMaterial map={tex} />
+        <meshBasicMaterial map={tex} toneMapped={false} />
       </mesh>
       {walls.map((w, i) => <Wall key={i} w={w} delay={0.15 + i * 0.04} />)}
       <Controls target={target} />

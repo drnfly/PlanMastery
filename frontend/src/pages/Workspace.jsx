@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Ruler, Loader2 } from "lucide-react";
+import { Ruler, Loader2, AlertTriangle } from "lucide-react";
 import { listProjects, getProject, analyzePage } from "@/lib/api";
 import { Sidebar } from "@/components/app/Sidebar";
 import { UploadPanel } from "@/components/app/UploadPanel";
@@ -32,7 +32,7 @@ export default function Workspace() {
     const load = async () => {
       const p = await getProject(activeId).catch(() => null);
       if (!p || stop) return;
-      setProject(p);
+      setProject((prev) => { if (prev?.id === p.id && prev.status !== p.status) refreshList(); return p; });
       const pg = p.pages?.[pageIdx];
       if (p.status === "ready" && pg?.status === "pending") { await analyzePage(p.id, pg.index); timer = setTimeout(load, 1000); return; }
       if (busy(p, pageIdx)) timer = setTimeout(load, 3500);
@@ -61,10 +61,12 @@ export default function Workspace() {
         <section className="col-span-12 lg:col-span-7 flex flex-col gap-4 min-w-0">
           {!project ? <UploadPanel onCreated={onCreated} /> : project.status === "processing" || !page ? (
             <div className="bg-[#111827] border border-slate-800 rounded-xl p-8 flex items-center gap-4" data-testid="processing-panel">
-              <Loader2 className="h-6 w-6 animate-spin text-cyan-400" />
+              {project.status === "failed" ? <AlertTriangle className="h-6 w-6 text-red-400" /> : <Loader2 className="h-6 w-6 animate-spin text-cyan-400" />}
               <div>
-                <p className="font-display font-semibold">{project.status === "failed" ? `Processing failed: ${project.error}` : "Splitting and indexing sheets…"}</p>
-                <p className="font-mono text-xs text-slate-500 mt-1" data-testid="processing-progress">{project.processed_pages || 0} / {project.page_count || "?"} sheets processed</p>
+                <p className="font-display font-semibold" data-testid="processing-status-text">{project.status === "failed" ? project.error : "Splitting and indexing sheets…"}</p>
+                {project.status === "failed"
+                  ? <p className="text-xs text-slate-500 mt-1">Delete this project from the sidebar and upload the file again.</p>
+                  : <p className="font-mono text-xs text-slate-500 mt-1" data-testid="processing-progress">{project.processed_pages || 0} / {project.page_count || "?"} sheets processed</p>}
               </div>
             </div>
           ) : (

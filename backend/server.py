@@ -5,7 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import os
 import json
 import uuid
@@ -118,7 +118,8 @@ async def process_project(pid: str, tmp: Path):
         await db.projects.update_one({"id": pid}, {"$set": {"status": "ready", "updated_at": now()}})
     except Exception as e:
         logger.exception("processing failed")
-        await db.projects.update_one({"id": pid}, {"$set": {"status": "failed", "error": str(e)[:300]}})
+        msg = "Could not read this file — it may be corrupt or password-protected." if "open" in str(e).lower() else "Processing failed — please re-upload."
+        await db.projects.update_one({"id": pid}, {"$set": {"status": "failed", "error": msg}})
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -190,15 +191,17 @@ async def upload_chunk(uid: str, n: int, request: Request):
     up = await db.uploads.find_one({"id": uid}, NO_ID)
     if not up:
         raise HTTPException(404, "Upload not found")
+    data = await request.body()
+    if n == up["next_chunk"] - 1 and len(data) == up.get("last_len"):
+        return {"received": (UPLOAD_DIR / uid).stat().st_size}
     if n != up["next_chunk"]:
         raise HTTPException(409, f"Expected chunk {up['next_chunk']}")
-    data = await request.body()
     tmp = UPLOAD_DIR / uid
     if tmp.stat().st_size + len(data) > up["size"]:
         raise HTTPException(400, "Chunk exceeds declared size")
     with open(tmp, "ab") as f:
         f.write(data)
-    await db.uploads.update_one({"id": uid}, {"$inc": {"next_chunk": 1}})
+    await db.uploads.update_one({"id": uid}, {"$inc": {"next_chunk": 1}, "$set": {"last_len": len(data)}})
     return {"received": tmp.stat().st_size}
 
 
@@ -302,6 +305,9 @@ async def chat(pid: str, body: ChatIn):
     current = next((pg for pg in pages if pg["index"] == body.page_index), pages[0])
     extra = relevant_pages(pages, question, current["index"])
     sources = [await ai_source(pg) for pg in [current, *extra]]
+    while len(sources) > 1 and sum(len(s[0]) for s in sources) > 30 * 1024 * 1024:
+        sources.pop()
+        extra.pop()
     history = await db.messages.find({"project_id": pid}, NO_ID).sort("created_at", 1).to_list(1000)
     await db.messages.insert_one({"id": str(uuid.uuid4()), "project_id": pid, "role": "user", "content": question,
                                   "page_index": current["index"], "created_at": now()})
@@ -334,7 +340,17 @@ async def chat(pid: str, body: ChatIn):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+async def cleanup_uploads():
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+    async for up in db.uploads.find({"created_at": {"$lt": cutoff}}, NO_ID):
+        (UPLOAD_DIR / up["id"]).unlink(missing_ok=True)
+        await db.uploads.delete_one({"id": up["id"]})
+    await db.projects.update_many({"status": "processing", "updated_at": {"$lt": cutoff}},
+                                  {"$set": {"status": "failed", "error": "Processing was interrupted — please re-upload."}})
+
+
 async def migrate_legacy():
+    await cleanup_uploads()
     async for p in db.projects.find({"page_count": {"$exists": False}, "storage_path": {"$exists": True}}, NO_ID):
         try:
             data = await fetch(p["storage_path"])

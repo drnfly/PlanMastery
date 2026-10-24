@@ -36,7 +36,7 @@ export const ChatPanel = ({ project, page }) => {
       <div className="px-4 py-3 border-b border-slate-800">
         <div className="flex items-center gap-2"><Bot className="h-4 w-4 text-cyan-400" /><p className="font-display font-semibold text-sm">Plan expert</p></div>
         <p className="font-mono text-[10px] text-slate-500 mt-1" data-testid="chat-expert-roles">Structural · Architect · ICF · Waterproofing</p>
-        {page && <p className="text-[11px] text-amber-400/90 mt-1 truncate" data-testid="chat-current-sheet">Viewing: {page.sheet_number || `Page ${page.index + 1}`} {page.title}</p>}
+        {page && <p className="text-[11px] text-amber-400/90 mt-1 truncate" data-testid="chat-current-sheet">Viewing: {page.sheet_number ? `${page.sheet_number} ` : ""}{page.title}</p>}
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3" data-testid="chat-message-list">
         {!project && <p className="text-xs text-slate-500">Upload or select a plan set to start asking questions.</p>}

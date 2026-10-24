@@ -1,0 +1,52 @@
+{
+  "summary": "Tested the new chunked-upload, large plan-set, per-sheet takeoff, 3D and expert-chat features end to end with real Gemini 3.1 Pro calls. Backend: replaced the obsolete test_blueprint_api.py with a 17-test pytest suite. All 17 pass (100%). They cover init validation (bad extension, >150MB, 0 bytes, exactly 150MB accepted), out-of-order chunk 409, chunk over declared size 400, incomplete complete 400, unknown upload 404, and a 34.8MB 6-page PDF (noisy ~10MB rasters plus title blocks) uploaded in 4MB chunks. That project went to processing, then ready, with 6 pages indexed correctly (A-000/A-101/A-102/S-201/S-301/A-501, with disciplines). Also covered: page image PNG, page 404, analyze on a vector sheet and on the 10MB raster sheet (both ready), model3d with walls in 0-1000 coords, SSE chat in the expert persona citing S-201, empty chat 400, and PNG upload plus soft delete. Frontend (Playwright, 1920x1080): uploaded the 34.8MB PDF via the UI. Checked the MB size label, upload-progress bar ('Uploading 78%/89%'), processing-panel progress (0/6, then 3/6), sheet-strip with 6 tabs, auto-takeoff on a pending sheet (analysis-pending, then analysis-summary), view-3d, generate-3d, model3d-generating, then plan-3d-canvas with model3d-legend (7 walls) and orbit drag, replay-3d, view-2d back, chat-current-sheet updating on tab switch, and chat streaming (text length grew 697 -> 1515 chars) with an ICF/waterproofing expert answer citing S-201. Found and fixed one real bug: a stale image-fetch race in BlueprintViewer.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/uploads/{id}/complete -> process_project", "issue": "On a corrupt PDF the project status becomes 'failed', but project.error exposes an internal server temp path ('Failed to open file /tmp/bp_uploads/<id>.pdf as type pdf'). Show a friendly message instead."},
+      {"endpoint": "POST /api/uploads/init", "issue": "Abandoned uploads are never cleaned up. The db.uploads docs and the 0-byte or partial temp files in /tmp/bp_uploads stay forever. A partial 150MB upload could fill the disk. Add a TTL index or cleanup job."},
+      {"endpoint": "PUT /api/uploads/{id}/chunk/{n}", "issue": "Not idempotent: if the chunk was written but the response was lost (network blip), retrying the same n returns 409, and the frontend has no resume or retry, so the whole upload fails. There is also a race where two concurrent PUTs with the same n can both append. Consider accepting n == next_chunk-1 with a matching size as a no-op, and retrying in api.js."},
+      {"endpoint": "POST /api/projects/{id}/chat", "issue": "The current sheet plus up to 2 keyword-matched sheets are each attached as a single-page PDF of up to 18MB (MAX_AI_PDF), so one request can carry about 54MB. That risks Gemini request-size errors or slow chats on large raster sets. Consider an overall cap, or falling back to PNG for extras."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "BlueprintViewer (image fetch)", "issue": "FIXED BY TESTER. Race: the fetchPageImage promise for the previous sheet could resolve after the new sheet's fetch and overwrite the URL. The header showed 'A-101 First Floor Plan' while the image (and the 3D floor texture) showed the A-000 cover. Reproduced deterministically by delaying the /pages/0/image route. Fixed with an `alive` guard in the useEffect cleanup and re-verified (correct 93,653-byte A-101 image shown).", "selector": "[data-testid='blueprint-image']", "priority": "HIGH"},
+      {"component": "Workspace processing-panel (failed state)", "issue": "When project.status == 'failed' the panel still shows a spinning loader and '0 / ? sheets processed'. The chat says 'Chat unlocks once the sheets are processed', which implies it is still working. Show an error icon, a friendly message and a delete/retry action.", "selector": "[data-testid='processing-panel']", "priority": "MEDIUM"},
+      {"component": "Sidebar status badge", "issue": "After processing finishes, the sidebar keeps showing 'PROCESSING' while the opened sheet is being analyzed. refreshList() only runs when nothing is busy, so the list is stale for 30-120s.", "selector": "sidebar project card badge", "priority": "LOW"},
+      {"component": "ChatPanel header during processing", "issue": "Shows 'Viewing: Page 1 Page 1' (fallback sheet number plus a placeholder title duplicated).", "selector": "[data-testid='chat-current-sheet']", "priority": "LOW"},
+      {"component": "BlueprintViewer image error", "issue": "If the image fetch fails, the spinner stays forever and there is no error state or toast.", "selector": "[data-testid='blueprint-canvas-viewer']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "3D view", "issues": ["The plan texture on the ground plane is very washed out: light grey paper, with plan linework barely visible under the ambient and directional lighting. Consider meshBasicMaterial for the sheet or lowering the light intensity so the plan reads clearly under the walls."]},
+      {"screen": "Sheet strip", "issues": ["The status dot of a sheet being analyzed stays grey until the next poll. Fine overall; the last tab is cut off at 1920px, but horizontal scroll works."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_blueprint_api.py", "/app/tests/make_large_planset.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Failed-processing UI: replace the spinner with an error state, hide internal paths from project.error, and offer delete/re-upload",
+    "Make chunk upload resilient: idempotent re-PUT of the last chunk, plus client-side retry with backoff in uploadPlans",
+    "Clean up abandoned uploads (TTL index on db.uploads plus temp-file sweeper)",
+    "Refresh the sidebar project list when project.status changes, not only when nothing is busy",
+    "Cap the total attachment size per chat request",
+    "Optional: improve plan-texture contrast in Plan3D"
+  ],
+  "critical_code_review_comments": [
+    "BlueprintViewer stale-fetch race (fixed). Apply the same pattern to any other async effects keyed on page/project.",
+    "Workspace pageIdx reset on activeId change was suspected of firing analyze on the stale index. Tested: it does NOT, because the stop flag plus the await getProject guard it.",
+    "/app/tests/upload_chunked.py hardcodes the project name 'Smith Residence Set'. Make it a CLI arg.",
+    "migrate_legacy runs on every startup and re-processes legacy PDFs with fire-and-forget create_task. It is fine, but it is not idempotent if a crash happens mid-way (delete_many pages runs before reprocessing).",
+    "chat(): if a project is 'ready' with 0 pages (should not happen), pages[0] raises IndexError and returns 500.",
+    "process_project runs inside a FastAPI BackgroundTask, so a backend restart mid-processing leaves the project stuck in 'processing' forever. Consider resuming on startup.",
+    "CORS allow_origins='*' with allow_credentials=True (carried over, low risk with no auth)."
+  ],
+  "updated_files": ["/app/backend/tests/test_blueprint_api.py", "/app/tests/make_large_planset.py", "/app/frontend/src/components/app/BlueprintViewer.jsx"],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "~95% (all requested flows pass after the race fix; minor UX issues remain)"},
+  "test_credentials": "none (no auth)",
+  "seed_data_creation": "Created TEST_Large_Planset (pytest), TEST_UI_Large_Set, TEST_Small_Target and TEST_Corrupt. All were soft-deleted after testing. User projects were not modified apart from read-only viewing of 'Smith Residence Set' (sheet 1 already had analysis and 3D).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: REACT_APP_BACKEND_URL=<url> pytest /app/backend/tests/test_blueprint_api.py (about 95s; it auto-generates a 34.8MB PDF at /tmp/TEST_large_planset.pdf via /app/tests/make_large_planset.py). Real Gemini calls: analysis takes about 20-60s and 3D about 30-60s. To reproduce the image race, use page.route to delay /pages/0/image by 2.5s, then click sheet-tab-1 immediately. For UI uploads, Playwright set_input_files works with /tmp/TEST_large_planset.pdf.",
+  "rca of the issue": "BlueprintViewer useEffect([project.id, page.index]) started fetchPageImage with no cancellation flag. Switching sheets before the previous fetch resolved let the old promise call setUrl() last, so the wrong sheet was shown in 2D and used as the 3D texture. Repro: open the Smith set and click the A-101 tab while the A-000 image is still loading (deterministic with a delayed route). Mitigation applied: a local `alive` flag set false in the cleanup, ignoring stale resolutions, plus .catch."
+}

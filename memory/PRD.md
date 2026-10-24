@@ -14,3 +14,12 @@ FastAPI (server.py, ai.py, storage.py) + MongoDB (projects, messages) + React (W
 - P1: Multi-sheet PDFs per page selection; overlay bounding boxes on drawing
 - P1: Material/quantity estimates (drywall, flooring, framing)
 - P2: Manual scale calibration tool; PDF report export; auth
+
+## Iteration 2 (2026-06)
+- Chunked uploads (4MB chunks, retry, idempotent) up to 150 MB; full PDF plan sets split per sheet (PNG + single-page vector PDF) and AI sheet index (number/title/discipline)
+- Takeoff runs automatically when a sheet is opened; per-sheet re-run
+- Chat persona: Structural Engineer + Architect + ICF & waterproofing specialist; attaches current sheet + 2 keyword-relevant sheets + sheet index + takeoffs
+- 3D view: AI traces wall centerlines -> walls rise out of the plan sheet (three.js / react-three-fiber, orbit, replay)
+- Legacy single-file PDFs auto-split on startup; stale uploads cleaned
+## Backlog next
+- Door/window cut-outs in 3D walls, ICF block/concrete quantity estimator, waterproofing detail checklist, PDF report export
