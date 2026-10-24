@@ -12,17 +12,18 @@ const label = (c) => c.replace("_", " ");
 const toCsv = (rows, cols) =>
   [cols.join(","), ...rows.map((r) => cols.map((c) => `"${String(r[c] ?? "").replace(/"/g, '""')}"`).join(","))].join("\n");
 
-export const DimensionTable = ({ project }) => {
+export const DimensionTable = ({ project, page }) => {
   const [tab, setTab] = useState("rooms");
   const [q, setQ] = useState("");
-  if (project.status !== "ready") return null;
+  if (page.status !== "ready" || !page.analysis) return null;
+  const analysis = page.analysis;
 
   const cols = COLS[tab];
-  const rows = (project.analysis[tab] || []).filter((r) => JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
+  const rows = (analysis[tab] || []).filter((r) => JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
 
   const exportCsv = () => {
-    const blob = new Blob([toCsv(project.analysis[tab] || [], cols)], { type: "text/csv" });
-    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `${project.name}-${tab}.csv` });
+    const blob = new Blob([toCsv(analysis[tab] || [], cols)], { type: "text/csv" });
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `${project.name}-${page.sheet_number || page.index + 1}-${tab}.csv` });
     a.click();
   };
 
@@ -33,7 +34,7 @@ export const DimensionTable = ({ project }) => {
           {Object.keys(COLS).map((t) => (
             <button key={t} data-testid={`tab-${t}`} onClick={() => setTab(t)}
               className={`px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors ${tab === t ? "bg-amber-500 text-[#0B0F17]" : "text-slate-400 hover:text-slate-100"}`}>
-              {t} <span className="font-mono opacity-70">{(project.analysis[t] || []).length}</span>
+              {t} <span className="font-mono opacity-70">{(analysis[t] || []).length}</span>
             </button>
           ))}
         </div>

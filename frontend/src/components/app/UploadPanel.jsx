@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { UploadCloud, Loader2, ScanLine } from "lucide-react";
 import { toast } from "sonner";
-import { createProject } from "@/lib/api";
+import { uploadPlans } from "@/lib/api";
 
 const ACCEPT = ".png,.jpg,.jpeg,.webp,.pdf";
 
@@ -12,15 +12,20 @@ export const UploadPanel = ({ onCreated }) => {
   const [scale, setScale] = useState("");
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
 
-  const pick = (f) => { if (f) { setFile(f); if (!name) setName(f.name.replace(/\.[^.]+$/, "")); } };
+  const pick = (f) => {
+    if (!f) return;
+    if (f.size > 150 * 1024 * 1024) return toast.error("File is larger than 150 MB");
+    setFile(f); if (!name) setName(f.name.replace(/\.[^.]+$/, ""));
+  };
 
   const submit = async () => {
     if (!file) return toast.error("Choose a blueprint file first");
-    setBusy(true);
+    setBusy(true); setProgress(0);
     try {
-      onCreated(await createProject(file, name, scale));
-      toast.success("Uploaded — AI is reading the drawing");
+      onCreated(await uploadPlans(file, name, scale, setProgress));
+      toast.success("Uploaded — splitting and indexing sheets");
     } catch (e) {
       toast.error(e.response?.data?.detail || "Upload failed");
     } finally { setBusy(false); }
@@ -38,7 +43,8 @@ export const UploadPanel = ({ onCreated }) => {
         className={`mt-8 blueprint-grid rounded-xl border-2 border-dashed p-10 cursor-pointer flex flex-col items-center justify-center text-center transition-colors ${drag ? "border-cyan-400" : "border-slate-700 hover:border-slate-500"}`}>
         <UploadCloud className="h-10 w-10 text-cyan-400 mb-3" />
         <p className="text-sm font-medium" data-testid="dropzone-file-name">{file ? file.name : "Drag & drop or click to browse"}</p>
-        <p className="font-mono text-[11px] text-slate-500 mt-1">PNG · JPG · WEBP · PDF — max 20 MB</p>
+        <p className="font-mono text-[11px] text-slate-500 mt-1">Full PDF plan sets or PNG · JPG · WEBP — max 150 MB</p>
+        {file && <p className="font-mono text-[11px] text-cyan-400 mt-1" data-testid="dropzone-file-size">{(file.size / 1048576).toFixed(1)} MB</p>}
         <input ref={inputRef} type="file" accept={ACCEPT} hidden data-testid="file-upload-input" onChange={(e) => pick(e.target.files[0])} />
       </div>
 
@@ -55,8 +61,13 @@ export const UploadPanel = ({ onCreated }) => {
 
       <button data-testid="analyze-blueprint-button" onClick={submit} disabled={busy}
         className="mt-6 inline-flex items-center gap-2 rounded-md bg-amber-500 text-[#0B0F17] font-semibold px-6 py-3 hover:bg-amber-400 active:scale-95 disabled:opacity-60 transition-[background-color,transform]">
-        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />} {busy ? "Uploading…" : "Analyze blueprint"}
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />} {busy ? `Uploading ${progress}%` : "Upload plans"}
       </button>
+      {busy && (
+        <div className="mt-4 h-1.5 w-full max-w-md bg-slate-800 rounded-full overflow-hidden" data-testid="upload-progress">
+          <div className="h-full bg-cyan-400 transition-[width] duration-300" style={{ width: `${progress}%` }} />
+        </div>
+      )}
     </div>
   );
 };

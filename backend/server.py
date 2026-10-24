@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request
 from fastapi.responses import Response, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -15,8 +15,14 @@ import asyncio
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-from storage import init_storage, put_object, get_object, APP_NAME  # noqa: E402
-from ai import analyze_blueprint, stream_chat  # noqa: E402
+import io  # noqa: E402
+import re  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+from PIL import Image  # noqa: E402
+from storage import init_storage, get_object  # noqa: E402
+from processing import open_pdf, process_pdf_page, process_image  # noqa: E402
+from ai_engine import index_sheets, analyze_sheet, model_sheet, stream_chat, temp_file  # noqa: E402
 
 client = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = client[os.environ['DB_NAME']]
@@ -27,8 +33,12 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 MIME = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp", "pdf": "application/pdf"}
-MAX_BYTES = 20 * 1024 * 1024
-PROJ_FIELDS = {"_id": 0}
+MAX_BYTES = 150 * 1024 * 1024
+MAX_AI_PDF = 18 * 1024 * 1024
+UPLOAD_DIR = Path(tempfile.gettempdir()) / "bp_uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+NO_ID = {"_id": 0}
+PAGE_LIST = {"_id": 0, "text": 0}
 
 
 def now():
@@ -37,28 +47,123 @@ def now():
 
 class ChatIn(BaseModel):
     message: str
+    page_index: int = 0
+
+
+class UploadInit(BaseModel):
+    filename: str
+    size: int
+
+
+class UploadComplete(BaseModel):
+    name: str = ""
+    scale_hint: str = ""
 
 
 async def get_project(pid: str) -> dict:
-    p = await db.projects.find_one({"id": pid, "is_deleted": False}, PROJ_FIELDS)
+    p = await db.projects.find_one({"id": pid, "is_deleted": False}, NO_ID)
     if not p:
         raise HTTPException(404, "Project not found")
     return p
 
 
-async def load_file(p: dict) -> bytes:
-    data, _ = await asyncio.to_thread(get_object, p["storage_path"])
+async def get_page(pid: str, idx: int, fields=NO_ID) -> dict:
+    pg = await db.pages.find_one({"project_id": pid, "index": idx}, fields)
+    if not pg:
+        raise HTTPException(404, "Sheet not found")
+    return pg
+
+
+async def fetch(path: str) -> bytes:
+    data, _ = await asyncio.to_thread(get_object, path)
     return data
 
 
-async def run_analysis(pid: str, data: bytes):
-    p = await db.projects.find_one({"id": pid}, PROJ_FIELDS)
+def sheet_label(pg: dict) -> str:
+    return " ".join(x for x in [pg.get("sheet_number"), pg.get("title")] if x) or f"Page {pg['index'] + 1}"
+
+
+async def ai_source(pg: dict):
+    """Vector single-page PDF when small enough, else rendered image."""
+    if pg.get("pdf_path") and pg.get("pdf_size", 0) <= MAX_AI_PDF:
+        return await fetch(pg["pdf_path"]), "pdf", "application/pdf"
+    ext = pg["image_path"].rsplit(".", 1)[-1]
+    return await fetch(pg["image_path"]), ext, MIME[ext]
+
+
+async def set_page(pid: str, idx: int, fields: dict):
+    await db.pages.update_one({"project_id": pid, "index": idx}, {"$set": fields})
+
+
+async def process_project(pid: str, tmp: Path):
+    p = await db.projects.find_one({"id": pid}, NO_ID)
     try:
-        result = await analyze_blueprint(data, p["ext"], p["content_type"], p.get("scale_hint", ""))
-        await db.projects.update_one({"id": pid}, {"$set": {"status": "ready", "analysis": result, "updated_at": now()}})
+        if p["ext"] == "pdf":
+            doc = await asyncio.to_thread(open_pdf, str(tmp))
+            await db.projects.update_one({"id": pid}, {"$set": {"page_count": doc.page_count}})
+            for i in range(doc.page_count):
+                pg = await asyncio.to_thread(process_pdf_page, doc, i, pid)
+                await db.pages.insert_one({**pg, "project_id": pid, "sheet_number": "", "title": f"Page {i + 1}",
+                                           "discipline": "", "status": "pending", "analysis": None, "error": None,
+                                           "model3d_status": "none", "model3d": None})
+                await db.projects.update_one({"id": pid}, {"$set": {"processed_pages": i + 1}})
+            doc.close()
+            await index_project(pid)
+        else:
+            pg = await asyncio.to_thread(process_image, tmp.read_bytes(), pid, p["ext"], p["content_type"])
+            await db.pages.insert_one({**pg, "project_id": pid, "sheet_number": "", "title": p["name"], "discipline": "",
+                                       "status": "pending", "analysis": None, "error": None,
+                                       "model3d_status": "none", "model3d": None})
+            await db.projects.update_one({"id": pid}, {"$set": {"page_count": 1, "processed_pages": 1}})
+        await db.projects.update_one({"id": pid}, {"$set": {"status": "ready", "updated_at": now()}})
+    except Exception as e:
+        logger.exception("processing failed")
+        await db.projects.update_one({"id": pid}, {"$set": {"status": "failed", "error": str(e)[:300]}})
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+async def index_project(pid: str):
+    pages = await db.pages.find({"project_id": pid}, {"_id": 0, "index": 1, "text": 1}).sort("index", 1).to_list(2000)
+    texted = [{"page": pg["index"] + 1, "text": pg["text"]} for pg in pages if pg["text"].strip()]
+    if not texted:
+        return
+    try:
+        for s in await index_sheets(texted):
+            await set_page(pid, int(s["page"]) - 1, {"sheet_number": s.get("sheet_number", ""),
+                                                      "title": s.get("title") or f"Page {s['page']}",
+                                                      "discipline": s.get("discipline", "")})
+    except Exception:
+        logger.exception("sheet indexing failed")
+
+
+async def run_analysis(pid: str, idx: int):
+    p = await db.projects.find_one({"id": pid}, NO_ID)
+    pg = await get_page(pid, idx)
+    try:
+        data, ext, mime = await ai_source(pg)
+        with temp_file(data, ext) as path:
+            result = await analyze_sheet(path, mime, sheet_label(pg), p.get("scale_hint", ""))
+        await set_page(pid, idx, {"status": "ready", "analysis": result, "error": None})
     except Exception as e:
         logger.exception("analysis failed")
-        await db.projects.update_one({"id": pid}, {"$set": {"status": "failed", "error": str(e)[:300], "updated_at": now()}})
+        await set_page(pid, idx, {"status": "failed", "error": str(e)[:300]})
+
+
+async def run_model3d(pid: str, idx: int):
+    pg = await get_page(pid, idx)
+    try:
+        data = await fetch(pg["image_path"])
+        if not pg["image_path"].endswith(".png"):
+            buf = io.BytesIO()
+            Image.open(io.BytesIO(data)).convert("RGB").save(buf, "PNG")
+            data = buf.getvalue()
+        with temp_file(data, "png") as path:
+            result = await model_sheet(path, sheet_label(pg))
+        await set_page(pid, idx, {"model3d_status": "ready", "model3d": result, "model3d_error": None})
+    except Exception as e:
+        logger.exception("3d failed")
+        await set_page(pid, idx, {"model3d_status": "failed", "model3d_error": str(e)[:300]})
 
 
 @api.get("/")
@@ -66,43 +171,66 @@ async def root():
     return {"message": "Blueprint AI"}
 
 
-@api.post("/projects")
-async def create_project(background: BackgroundTasks, file: UploadFile = File(...),
-                         name: str = Form(""), scale_hint: str = Form("")):
-    ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "").lower()
+@api.post("/uploads/init")
+async def upload_init(body: UploadInit):
+    ext = body.filename.rsplit(".", 1)[-1].lower() if "." in body.filename else ""
     if ext not in MIME:
         raise HTTPException(400, "Unsupported file type. Use PNG, JPG, WEBP or PDF.")
-    data = await file.read()
-    if not data or len(data) > MAX_BYTES:
-        raise HTTPException(400, "File must be between 1 byte and 20 MB.")
+    if body.size <= 0 or body.size > MAX_BYTES:
+        raise HTTPException(400, "File must be between 1 byte and 150 MB.")
+    uid = str(uuid.uuid4())
+    (UPLOAD_DIR / uid).write_bytes(b"")
+    await db.uploads.insert_one({"id": uid, "filename": body.filename, "ext": ext, "size": body.size,
+                                 "next_chunk": 0, "created_at": now()})
+    return {"upload_id": uid}
+
+
+@api.put("/uploads/{uid}/chunk/{n}")
+async def upload_chunk(uid: str, n: int, request: Request):
+    up = await db.uploads.find_one({"id": uid}, NO_ID)
+    if not up:
+        raise HTTPException(404, "Upload not found")
+    if n != up["next_chunk"]:
+        raise HTTPException(409, f"Expected chunk {up['next_chunk']}")
+    data = await request.body()
+    tmp = UPLOAD_DIR / uid
+    if tmp.stat().st_size + len(data) > up["size"]:
+        raise HTTPException(400, "Chunk exceeds declared size")
+    with open(tmp, "ab") as f:
+        f.write(data)
+    await db.uploads.update_one({"id": uid}, {"$inc": {"next_chunk": 1}})
+    return {"received": tmp.stat().st_size}
+
+
+@api.post("/uploads/{uid}/complete")
+async def upload_complete(uid: str, body: UploadComplete, background: BackgroundTasks):
+    up = await db.uploads.find_one({"id": uid}, NO_ID)
+    tmp = UPLOAD_DIR / uid
+    if not up or not tmp.exists() or tmp.stat().st_size != up["size"]:
+        raise HTTPException(400, "Upload incomplete")
     pid = str(uuid.uuid4())
-    stored = await asyncio.to_thread(put_object, f"{APP_NAME}/uploads/{pid}.{ext}", data, MIME[ext])
-    doc = {"id": pid, "name": name.strip() or file.filename.rsplit(".", 1)[0], "original_filename": file.filename,
-           "storage_path": stored["path"], "content_type": MIME[ext], "ext": ext, "size": len(data),
-           "scale_hint": scale_hint.strip(), "status": "analyzing", "analysis": None, "error": None,
+    final = UPLOAD_DIR / f"{pid}.{up['ext']}"
+    shutil.move(str(tmp), final)
+    await db.uploads.delete_one({"id": uid})
+    doc = {"id": pid, "name": body.name.strip() or up["filename"].rsplit(".", 1)[0], "original_filename": up["filename"],
+           "content_type": MIME[up["ext"]], "ext": up["ext"], "size": up["size"], "scale_hint": body.scale_hint.strip(),
+           "status": "processing", "page_count": 0, "processed_pages": 0, "error": None,
            "is_deleted": False, "created_at": now(), "updated_at": now()}
     await db.projects.insert_one(doc.copy())
-    background.add_task(run_analysis, pid, data)
+    background.add_task(process_project, pid, final)
     return doc
 
 
 @api.get("/projects")
 async def list_projects():
-    return await db.projects.find({"is_deleted": False}, {"_id": 0, "analysis": 0}).sort("created_at", -1).to_list(500)
+    return await db.projects.find({"is_deleted": False}, NO_ID).sort("created_at", -1).to_list(500)
 
 
 @api.get("/projects/{pid}")
 async def project_detail(pid: str):
-    return await get_project(pid)
-
-
-@api.post("/projects/{pid}/reanalyze")
-async def reanalyze(pid: str, background: BackgroundTasks):
     p = await get_project(pid)
-    data = await load_file(p)
-    await db.projects.update_one({"id": pid}, {"$set": {"status": "analyzing", "error": None}})
-    background.add_task(run_analysis, pid, data)
-    return {"status": "analyzing"}
+    p["pages"] = await db.pages.find({"project_id": pid}, PAGE_LIST).sort("index", 1).to_list(2000)
+    return p
 
 
 @api.delete("/projects/{pid}")
@@ -112,15 +240,54 @@ async def delete_project(pid: str):
     return {"ok": True}
 
 
-@api.get("/projects/{pid}/file")
-async def project_file(pid: str):
-    p = await get_project(pid)
-    return Response(content=await load_file(p), media_type=p["content_type"])
+@api.get("/projects/{pid}/pages/{idx}/image")
+async def page_image(pid: str, idx: int):
+    pg = await get_page(pid, idx, PAGE_LIST)
+    ext = pg["image_path"].rsplit(".", 1)[-1]
+    return Response(content=await fetch(pg["image_path"]), media_type=MIME[ext],
+                    headers={"Cache-Control": "private, max-age=86400"})
+
+
+@api.post("/projects/{pid}/pages/{idx}/analyze")
+async def analyze_page(pid: str, idx: int, background: BackgroundTasks):
+    await get_page(pid, idx, PAGE_LIST)
+    await set_page(pid, idx, {"status": "analyzing", "error": None})
+    background.add_task(run_analysis, pid, idx)
+    return {"status": "analyzing"}
+
+
+@api.post("/projects/{pid}/pages/{idx}/model3d")
+async def model_page(pid: str, idx: int, background: BackgroundTasks):
+    await get_page(pid, idx, PAGE_LIST)
+    await set_page(pid, idx, {"model3d_status": "generating", "model3d_error": None})
+    background.add_task(run_model3d, pid, idx)
+    return {"model3d_status": "generating"}
 
 
 @api.get("/projects/{pid}/messages")
 async def messages(pid: str):
-    return await db.messages.find({"project_id": pid}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    return await db.messages.find({"project_id": pid}, NO_ID).sort("created_at", 1).to_list(1000)
+
+
+def relevant_pages(pages: list, question: str, exclude: int, k: int = 2) -> list:
+    words = {w for w in re.findall(r"[a-z0-9]{4,}", question.lower())}
+    scored = []
+    for pg in pages:
+        if pg["index"] == exclude or not words:
+            continue
+        hay = f"{pg.get('title', '')} {pg.get('discipline', '')} {pg.get('text', '')}".lower()
+        score = sum(hay.count(w) for w in words) + 5 * sum(w in pg.get("title", "").lower() for w in words)
+        if score:
+            scored.append((score, pg))
+    return [pg for _, pg in sorted(scored, key=lambda x: -x[0])[:k]]
+
+
+def build_context(pages: list, current: dict, extra: list) -> str:
+    index = "\n".join(f"- Page {pg['index'] + 1}: {sheet_label(pg)} [{pg.get('discipline', '')}]" for pg in pages)
+    takeoffs = json.dumps({sheet_label(pg): pg["analysis"] for pg in pages if pg.get("analysis")})[:30000]
+    attached = ", ".join(sheet_label(pg) for pg in [current, *extra])
+    return (f"PLAN SET SHEET INDEX:\n{index}\n\nATTACHED SHEETS (in order): {attached}\n"
+            f"The user is currently viewing: {sheet_label(current)}\n\nPRIOR TAKEOFFS (JSON):\n{takeoffs or '(none yet)'}")
 
 
 @api.post("/projects/{pid}/chat")
@@ -129,20 +296,35 @@ async def chat(pid: str, body: ChatIn):
     question = body.message.strip()
     if not question:
         raise HTTPException(400, "Message is empty")
-    history = await db.messages.find({"project_id": pid}, {"_id": 0}).sort("created_at", 1).to_list(1000)
-    data = await load_file(p)
-    await db.messages.insert_one({"id": str(uuid.uuid4()), "project_id": pid, "role": "user",
-                                  "content": question, "created_at": now()})
+    if p["status"] != "ready":
+        raise HTTPException(400, "Plans are still processing")
+    pages = await db.pages.find({"project_id": pid}, NO_ID).sort("index", 1).to_list(2000)
+    current = next((pg for pg in pages if pg["index"] == body.page_index), pages[0])
+    extra = relevant_pages(pages, question, current["index"])
+    sources = [await ai_source(pg) for pg in [current, *extra]]
+    history = await db.messages.find({"project_id": pid}, NO_ID).sort("created_at", 1).to_list(1000)
+    await db.messages.insert_one({"id": str(uuid.uuid4()), "project_id": pid, "role": "user", "content": question,
+                                  "page_index": current["index"], "created_at": now()})
+    context = build_context(pages, current, extra)
 
     async def events():
         answer = ""
+        paths = []
         try:
-            async for tok in stream_chat(data, p["ext"], p["content_type"], p.get("analysis") or {}, history, question):
+            for data, ext, _ in sources:
+                path = Path(tempfile.gettempdir()) / f"{uuid.uuid4()}.{ext}"
+                path.write_bytes(data)
+                paths.append(str(path))
+            files = [(path, mime) for path, (_, _, mime) in zip(paths, sources)]
+            async for tok in stream_chat(files, context, history, question):
                 answer += tok
                 yield f"data: {json.dumps({'delta': tok})}\n\n"
         except Exception as e:
             logger.exception("chat failed")
             yield f"data: {json.dumps({'error': str(e)[:200]})}\n\n"
+        finally:
+            for path in paths:
+                Path(path).unlink(missing_ok=True)
         if answer:
             await db.messages.insert_one({"id": str(uuid.uuid4()), "project_id": pid, "role": "assistant",
                                           "content": answer, "created_at": now()})
@@ -150,6 +332,35 @@ async def chat(pid: str, body: ChatIn):
 
     return StreamingResponse(events(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+async def migrate_legacy():
+    async for p in db.projects.find({"page_count": {"$exists": False}, "storage_path": {"$exists": True}}, NO_ID):
+        try:
+            data = await fetch(p["storage_path"])
+            w, h = Image.open(io.BytesIO(data)).size if p["ext"] != "pdf" else (0, 0)
+        except Exception:
+            w, h = 0, 0
+        await db.pages.insert_one({"project_id": p["id"], "index": 0, "image_path": p["storage_path"], "pdf_path": None,
+                                   "pdf_size": 0, "img_w": w, "img_h": h, "text": "", "sheet_number": "",
+                                   "title": p["name"], "discipline": "",
+                                   "status": "ready" if p.get("analysis") else "pending", "analysis": p.get("analysis"),
+                                   "error": None, "model3d_status": "none", "model3d": None})
+        await db.projects.update_one({"id": p["id"]}, {"$set": {"page_count": 1, "processed_pages": 1, "status": "ready"},
+                                                       "$unset": {"analysis": ""}})
+    async for pg in db.pages.find({"pdf_path": None, "image_path": {"$regex": r"\.pdf$"}}, NO_ID):
+        pid = pg["project_id"]
+        try:
+            tmp = UPLOAD_DIR / f"{pid}.pdf"
+            tmp.write_bytes(await fetch(pg["image_path"]))
+            await db.pages.delete_many({"project_id": pid})
+            await db.projects.update_one({"id": pid}, {"$set": {"status": "processing", "processed_pages": 0}})
+            await process_project(pid, tmp)
+            if pg.get("analysis") and await db.pages.count_documents({"project_id": pid}) == 1:
+                await set_page(pid, 0, {"analysis": pg["analysis"], "status": "ready"})
+        except Exception:
+            logger.exception(f"legacy pdf repair failed for {pid}")
+
 
 
 app.include_router(api)
@@ -163,6 +374,7 @@ async def startup():
     try:
         init_storage()
         logger.info("Storage initialized")
+        asyncio.create_task(migrate_legacy())
     except Exception as e:
         logger.error(f"Storage init failed: {e}")
 

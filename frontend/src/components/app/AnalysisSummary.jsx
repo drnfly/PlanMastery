@@ -1,6 +1,6 @@
 import { AlertTriangle, RefreshCw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { reanalyze } from "@/lib/api";
+import { analyzePage } from "@/lib/api";
 
 const Stat = ({ label, value, id }) => (
   <div className="border border-slate-800 rounded-lg p-3 bg-[#0B0F17]">
@@ -9,20 +9,20 @@ const Stat = ({ label, value, id }) => (
   </div>
 );
 
-export const AnalysisSummary = ({ project, onReanalyze }) => {
-  const a = project.analysis;
-  const rerun = async () => { await reanalyze(project.id); toast.info("Re-analyzing drawing"); onReanalyze(); };
+export const AnalysisSummary = ({ project, page, onChange }) => {
+  const a = page.analysis;
+  const rerun = async () => { await analyzePage(project.id, page.index); toast.info("Re-analyzing sheet"); onChange(); };
 
-  if (project.status === "analyzing") return (
+  if (page.status === "analyzing" || page.status === "pending") return (
     <div className="bg-[#111827] border border-slate-800 rounded-xl p-6 flex items-center gap-3" data-testid="analysis-pending">
       <Loader2 className="h-5 w-5 animate-spin text-cyan-400" />
       <div><p className="text-sm font-medium">Reading dimensions, room tags and schedules…</p><p className="text-xs text-slate-500">Detailed drawings can take up to a minute or two.</p></div>
     </div>
   );
 
-  if (project.status === "failed") return (
+  if (page.status === "failed") return (
     <div className="bg-[#111827] border border-red-500/30 rounded-xl p-6 flex items-center justify-between gap-4" data-testid="analysis-failed">
-      <p className="text-sm text-red-300">Analysis failed: {project.error}</p>
+      <p className="text-sm text-red-300">Analysis failed: {page.error}</p>
       <button data-testid="retry-analysis-button" onClick={rerun} className="text-xs border border-slate-700 rounded-md px-3 py-2 hover:bg-slate-800 transition-colors flex items-center gap-1.5"><RefreshCw className="h-3.5 w-3.5" />Retry</button>
     </div>
   );

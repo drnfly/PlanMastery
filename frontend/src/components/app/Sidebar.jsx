@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { deleteProject } from "@/lib/api";
 
 const STATUS = {
+  processing: "text-cyan-400 border-cyan-500/40",
   analyzing: "text-cyan-400 border-cyan-500/40",
   ready: "text-emerald-400 border-emerald-500/40",
   failed: "text-red-400 border-red-500/40",
@@ -40,7 +41,7 @@ export const Sidebar = ({ projects, activeId, onSelect, onNew, onDeleted }) => {
               {p.ext === "pdf" ? <FileText className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" /> : <ImageIcon className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />}
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium truncate">{p.name}</p>
-                <p className="font-mono text-[10px] text-slate-500">{new Date(p.created_at).toLocaleDateString()}</p>
+                <p className="font-mono text-[10px] text-slate-500">{new Date(p.created_at).toLocaleDateString()}{p.page_count > 1 ? ` · ${p.page_count} sheets` : ""}</p>
               </div>
               <button data-testid={`delete-project-${p.id}`} onClick={(e) => remove(e, p.id)} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-red-400">
                 <Trash2 className="h-3.5 w-3.5" />

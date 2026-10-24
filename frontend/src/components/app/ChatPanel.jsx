@@ -4,9 +4,9 @@ import { toast } from "sonner";
 import { getMessages, streamChat } from "@/lib/api";
 import { Markdown } from "@/components/app/Markdown";
 
-const PROMPTS = ["What is the total square footage?", "List all door widths", "Dimensions of the kitchen?", "Total exterior wall length?"];
+const PROMPTS = ["What is the total square footage?", "Is this foundation suitable for ICF walls?", "Review the waterproofing at the foundation", "Size the header over the widest opening"];
 
-export const ChatPanel = ({ project }) => {
+export const ChatPanel = ({ project, page }) => {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -22,7 +22,7 @@ export const ChatPanel = ({ project }) => {
     setInput(""); setBusy(true);
     setMsgs((m) => [...m, { role: "user", content: q }, { role: "assistant", content: "" }]);
     try {
-      await streamChat(project.id, q, (d) => setMsgs((m) => {
+      await streamChat(project.id, q, page?.index ?? 0, (d) => setMsgs((m) => {
         const copy = [...m]; copy[copy.length - 1] = { role: "assistant", content: copy[copy.length - 1].content + d }; return copy;
       }));
     } catch (e) {
@@ -33,12 +33,14 @@ export const ChatPanel = ({ project }) => {
 
   return (
     <aside data-testid="chat-panel-container" className="col-span-12 lg:col-span-3 bg-[#111827] border border-slate-800 rounded-xl flex flex-col h-[640px] lg:h-[calc(100vh-97px)] lg:sticky lg:top-[81px]">
-      <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-2">
-        <Bot className="h-4 w-4 text-cyan-400" /><p className="font-display font-semibold text-sm">Dimension assistant</p>
+      <div className="px-4 py-3 border-b border-slate-800">
+        <div className="flex items-center gap-2"><Bot className="h-4 w-4 text-cyan-400" /><p className="font-display font-semibold text-sm">Plan expert</p></div>
+        <p className="font-mono text-[10px] text-slate-500 mt-1" data-testid="chat-expert-roles">Structural · Architect · ICF · Waterproofing</p>
+        {page && <p className="text-[11px] text-amber-400/90 mt-1 truncate" data-testid="chat-current-sheet">Viewing: {page.sheet_number || `Page ${page.index + 1}`} {page.title}</p>}
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3" data-testid="chat-message-list">
-        {!project && <p className="text-xs text-slate-500">Upload or select a blueprint to start asking questions.</p>}
-        {project && !ready && <p className="text-xs text-slate-500">Chat unlocks once analysis is complete.</p>}
+        {!project && <p className="text-xs text-slate-500">Upload or select a plan set to start asking questions.</p>}
+        {project && !ready && <p className="text-xs text-slate-500">Chat unlocks once the sheets are processed.</p>}
         {ready && msgs.length === 0 && (
           <div className="space-y-2">
             <p className="text-xs text-slate-500 mb-2">Try asking:</p>
@@ -57,7 +59,7 @@ export const ChatPanel = ({ project }) => {
       <div className="p-3 border-t border-slate-800 flex gap-2">
         <textarea data-testid="chat-input-textarea" rows={2} value={input} disabled={!ready} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder={ready ? "Ask about any dimension…" : "Waiting for blueprint"}
+          placeholder={ready ? "Ask anything about these plans…" : "Waiting for plans"}
           className="flex-1 resize-none bg-[#0B0F17] border border-slate-800 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:opacity-50" />
         <button data-testid="chat-send-button" onClick={() => send()} disabled={!ready || busy || !input.trim()}
           className="self-end h-10 w-10 flex items-center justify-center rounded-md bg-amber-500 text-[#0B0F17] hover:bg-amber-400 disabled:opacity-40 active:scale-95 transition-[background-color,transform]">

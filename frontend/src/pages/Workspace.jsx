@@ -1,39 +1,50 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Ruler } from "lucide-react";
-import { listProjects, getProject } from "@/lib/api";
+import { Ruler, Loader2 } from "lucide-react";
+import { listProjects, getProject, analyzePage } from "@/lib/api";
 import { Sidebar } from "@/components/app/Sidebar";
 import { UploadPanel } from "@/components/app/UploadPanel";
 import { BlueprintViewer } from "@/components/app/BlueprintViewer";
 import { DimensionTable } from "@/components/app/DimensionTable";
 import { ChatPanel } from "@/components/app/ChatPanel";
 import { AnalysisSummary } from "@/components/app/AnalysisSummary";
+import { SheetStrip } from "@/components/app/SheetStrip";
+
+const busy = (p, i) => p.status === "processing" || p.pages?.some((pg) => pg.status === "analyzing" || pg.model3d_status === "generating") || p.pages?.[i]?.status === "pending";
 
 export default function Workspace() {
   const [projects, setProjects] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [project, setProject] = useState(null);
+  const [pageIdx, setPageIdx] = useState(0);
+  const [tick, setTick] = useState(0);
 
   const refreshList = useCallback(() => listProjects().then(setProjects).catch(() => toast.error("Could not load projects")), []);
+  const poke = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => { refreshList(); }, [refreshList]);
+  useEffect(() => { setPageIdx(0); }, [activeId]);
 
   useEffect(() => {
     if (!activeId) { setProject(null); return; }
     let timer;
+    let stop = false;
     const load = async () => {
       const p = await getProject(activeId).catch(() => null);
-      if (!p) return;
+      if (!p || stop) return;
       setProject(p);
-      if (p.status === "analyzing") timer = setTimeout(load, 4000);
+      const pg = p.pages?.[pageIdx];
+      if (p.status === "ready" && pg?.status === "pending") { await analyzePage(p.id, pg.index); timer = setTimeout(load, 1000); return; }
+      if (busy(p, pageIdx)) timer = setTimeout(load, 3500);
       else refreshList();
     };
     load();
-    return () => clearTimeout(timer);
-  }, [activeId, refreshList]);
+    return () => { stop = true; clearTimeout(timer); };
+  }, [activeId, pageIdx, tick, refreshList]);
 
   const onCreated = (p) => { setProjects((prev) => [p, ...prev]); setActiveId(p.id); };
   const onDeleted = (id) => { setProjects((prev) => prev.filter((x) => x.id !== id)); if (id === activeId) setActiveId(null); };
+  const page = project?.pages?.[pageIdx];
 
   return (
     <div className="min-h-screen" data-testid="workspace">
@@ -48,15 +59,24 @@ export default function Workspace() {
       <main className="grid grid-cols-1 lg:grid-cols-12 gap-4 p-4">
         <Sidebar projects={projects} activeId={activeId} onSelect={setActiveId} onNew={() => setActiveId(null)} onDeleted={onDeleted} />
         <section className="col-span-12 lg:col-span-7 flex flex-col gap-4 min-w-0">
-          {!project ? <UploadPanel onCreated={onCreated} /> : (
+          {!project ? <UploadPanel onCreated={onCreated} /> : project.status === "processing" || !page ? (
+            <div className="bg-[#111827] border border-slate-800 rounded-xl p-8 flex items-center gap-4" data-testid="processing-panel">
+              <Loader2 className="h-6 w-6 animate-spin text-cyan-400" />
+              <div>
+                <p className="font-display font-semibold">{project.status === "failed" ? `Processing failed: ${project.error}` : "Splitting and indexing sheets…"}</p>
+                <p className="font-mono text-xs text-slate-500 mt-1" data-testid="processing-progress">{project.processed_pages || 0} / {project.page_count || "?"} sheets processed</p>
+              </div>
+            </div>
+          ) : (
             <>
-              <BlueprintViewer project={project} />
-              <AnalysisSummary project={project} onReanalyze={() => setProject({ ...project, status: "analyzing" })} />
-              <DimensionTable project={project} />
+              <SheetStrip pages={project.pages} active={pageIdx} onSelect={setPageIdx} />
+              <BlueprintViewer project={project} page={page} onChange={poke} />
+              <AnalysisSummary project={project} page={page} onChange={poke} />
+              <DimensionTable project={project} page={page} />
             </>
           )}
         </section>
-        <ChatPanel project={project} />
+        <ChatPanel project={project} page={page} />
       </main>
     </div>
   );
