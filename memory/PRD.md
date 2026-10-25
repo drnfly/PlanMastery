@@ -23,3 +23,10 @@ FastAPI (server.py, ai.py, storage.py) + MongoDB (projects, messages) + React (W
 - Legacy single-file PDFs auto-split on startup; stale uploads cleaned
 ## Backlog next
 - Door/window cut-outs in 3D walls, ICF block/concrete quantity estimator, waterproofing detail checklist, PDF report export
+
+## Iteration 3 (2026-06)
+- "Scan entire set": all sheets analyzed in parallel (3 at a time); each sheet gets takeoff + expert_notes (crew notes) + digest (full text transcription)
+- Whole-set Q&A: chat scope "Entire set" (default) — AI routes the question across all sheet digests, attaches the best sheets, cites sources (chips)
+- Branded PDF takeoff report (reportlab): logo, company/prepared by/phone/email/client, cover + sheet table, per-sheet dims/image/tables/expert notes/verify list, optional Expert Q&A appendix; branding saved globally
+## Backlog
+- Door/window cut-outs in 3D, ICF block/concrete estimator, waterproofing checklist, per-crew report filters (e.g., foundation crew only)

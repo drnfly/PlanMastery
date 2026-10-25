@@ -1,0 +1,48 @@
+{
+  "summary": "Iteration 3: tested scan-entire-set, brand settings/logo, branded PDF takeoff report, set-scope chat (backend pytest + Playwright UI). Backend 16/17 passed; frontend all checked flows passed. Main findings: (1) a corrupt logo makes the report return 500, (2) 'max 3 concurrent' scanning does not happen because Starlette BackgroundTasks run one after another, (3) a few small report/brand-merge bugs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/settings/brand/logo + POST /api/projects/{id}/report", "issue": "The logo is checked by file extension only. A non-image file named .png is accepted (200), and after that every report fails with 500 (PIL UnidentifiedImageError in ReportLab ImageReader, report.py:125). Fix: open the logo with PIL.Image.open(...).verify() on upload and return 400 if it fails. In build_report, wrap the logo load in try/except and skip the logo if it fails."},
+      {"endpoint": "POST /api/projects/{id}/scan", "issue": "PERFORMANCE: scan_set adds N background.add_task calls. Starlette BackgroundTasks.__call__ awaits them in order, so sheets are analyzed one at a time and SCAN_SEM(3) never has more than one holder. Seen in the UI: sheets finished 1 -> 2 -> 3 about 16s apart. A 23-sheet set would take about 15+ minutes. Fix: add one task that runs asyncio.gather(*[run_analysis(pid,i) for i in idxs]). The semaphore then limits it to 3 at a time. Or use asyncio.create_task per sheet."},
+      {"endpoint": "POST /api/projects/{id}/report", "issue": "Brand merge/persist mismatch (found in code review, not run live). The merge ignores empty body values and falls back to the stored ones, but the $set saves the body's empty strings. So if a user clears a field (e.g. phone), the old value still shows in that PDF but is erased from storage. Also, calling the endpoint with no 'brand' wipes all saved branding, because the default Brand() is all empty strings and gets $set. Fix: use the body brand as-is (body wins) and save only the fields that were provided (model_dump(exclude_unset=True))."},
+      {"endpoint": "report.py cover table", "issue": "P(0) renders empty because of `str(text or '')`, so counts of 0 rooms/walls/openings show as blank cells. 'Openings' header wraps to 'Openin/gs' (0.6in column). Walls ID column (0.45in) wraps 'W-EXT' to 'W-EX/T'. Widen those columns and use `'' if text is None else str(text)`."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "ReportDialog", "issues": ["Possible: in the screenshot the Q&A switch looked the same as the checked images switch right after it was set to unchecked (data-state was 'unchecked'). The screenshot may have been taken before the transition finished. Check that the unchecked Switch (bg-input) is clearly different on the dark #111827 background."]}
+    ]
+  },
+  "passed_tests": [
+    "Scan from scratch (TEST_ScanSet_it3, 3 sheets): queued 3, all set to analyzing, a second call while analyzing returns queued 0, all sheets became ready with expert_notes[] and digest, a call after completion returns queued 0, unknown project returns 404",
+    "Brand GET/PUT round trip with no _id; logo rejects gif/pdf and files over 5MB; PNG upload -> GET returns the same bytes -> DELETE -> GET 404",
+    "Report PDF (pymupdf): content-type application/pdf, attachment; contains company, client, all sheet titles, S-201, 'Expert notes for crews', 'DIMENSION TAKEOFF REPORT', 'Verify on site', Expert Q&A; 3 sheet images; include_images=false gives 0 images; pages=[2] subset; PNG logo appears in the header of every page; JPG logo works; pages=[99] gives 400 with a 'scan' message; unknown project gives 404; brand saved after report",
+    "Set-scope chat from page_index 0 (cover) asking about footing rebar: SSE events status -> sources ['S-201 Foundation Plan'] -> deltas; assistant message saved with matching sources; user msg scope='set'. Sheet scope: no status event, sources start with A-101. Empty message gives 400",
+    "UI: scan-progress-text 0/3 -> '0/3 · 3 scanning' -> 1/3 (33%) -> 2/3 (67%) -> 3/3 (100%); scan-set-button shows Scanning… then 'Set fully scanned' (disabled); open-report-dialog-button disabled until a sheet is scanned",
+    "UI: report-dialog loads saved branding; edited phone/client; logo upload shows report-logo-preview and 'Logo saved' toast; switches toggle; report-download-button triggers download Smith_Residence_Set_takeoff_report.pdf (PDF holds the edited branding and no Q&A when it is switched off); dialog closes; on reopen the branding and logo are still there; logo remove works",
+    "UI: chat-scope-set active by default; chat-search-status shows 'Searching all 3 sheets (3 fully scanned)…'; answer shows chat-message-sources chip 'S-201 Foundation Plan' while viewing A-000; chat-scope-sheet toggles; source chips still show after reload"
+  ],
+  "test_report_links": ["/app/backend/tests/test_iter3_scan_report_chat.py", "/app/test_reports/pytest/iter3_report.xml", "/app/test_reports/pytest/iter3_chat.xml", "/app/test_reports/pytest/iter3_scan.xml"],
+  "action_items": [
+    "Check logo uploads with PIL (verify) and make build_report survive a bad logo (it currently returns 500)",
+    "Make scan_set really run up to 3 at a time (asyncio.gather or create_task in one background task). BackgroundTasks are sequential",
+    "Fix the report brand merge/persist mismatch (body should win; do not wipe saved branding when brand is omitted)",
+    "report.py: show 0 counts as '0'; widen the Openings and wall ID columns"
+  ],
+  "critical_code_review_comments": [
+    "server.py scan_set: SCAN_SEM is acquired only around analyze_sheet, but the tasks are sequential anyway. Also, if the process restarts mid-scan, sheets stay 'analyzing' forever and scan_set skips them (status $ne analyzing). Consider a stale-analyzing reset on startup",
+    "chat(): the user message is saved before streaming. If the LLM fails, a lone user message stays in history and is sent back as context",
+    "Workspace polling: busy() is true while the current page is 'pending', so it keeps polling as long as an unscanned sheet is selected",
+    "Brand settings are global with no auth. A real user changed them during testing (Acme ICF Builders -> Titan ICF), so tests that change the brand clash with real usage"
+  ],
+  "updated_files": ["/app/backend/tests/test_iter3_scan_report_chat.py", "/app/tests/upload_test_project.py"],
+  "success_rate": {"backend": "94% (16/17)", "frontend": "100% of tested flows"},
+  "seed_data_creation": "Created projects TEST_ScanSet_it3 (c8aa8472-f049-41d1-bc50-b535bc4a6bb3) and TEST_UIScan_it3 (ce4cc85b-3307-4db9-be73-40b8421403f1), both fully scanned. Added chat messages to Smith Residence Set. Brand restored to the latest live value {company_name:'Titan ICF', prepared_by:'C.Johnson'}; no logo.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run the iter3 tests with `-n 0` (xdist is on by default and parallel workers race on the global brand/logo). To run TestScanSet, set TEST_SCAN_PID to the id of a fresh TEST_ project, uploaded with `python3 /app/tests/upload_test_project.py <BASE_URL> /app/tests/sample_planset.pdf TEST_name`. The brand_backup fixture restores the brand it captured at module start; this can overwrite changes a real user makes during the run.",
+  "rca of the issue": "Corrupt logo 500: put_logo checks only the filename extension. ImageReader(io.BytesIO(logo)) in build_report raises UnidentifiedImageError, which is not caught, so the server returns 500. Repro: POST a file named logo.png containing b'not an image', then POST /report gives 500. Sequential scan: starlette.background.BackgroundTasks.__call__ does `for task in self.tasks: await task()`."
+}

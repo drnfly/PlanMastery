@@ -31,15 +31,15 @@ S = {
 COLS = {
     "rooms": [("name", "Room", 1.5), ("width", "Width", 0.8), ("length", "Length", 0.8), ("area", "Area", 0.8),
               ("ceiling_height", "Clg ht", 0.6), ("source", "Src", 0.6), ("notes", "Notes", 2.0)],
-    "walls": [("id", "ID", 0.45), ("location", "Location", 1.5), ("length", "Length", 0.75), ("thickness", "Thick", 0.7),
-              ("type", "Type", 0.9), ("source", "Src", 0.6), ("notes", "Notes", 2.2)],
-    "openings": [("id", "ID", 0.45), ("type", "Type", 0.7), ("location", "Location", 1.5), ("width", "Width", 0.75),
-                 ("height", "Height", 0.75), ("source", "Src", 0.6), ("notes", "Notes", 2.35)],
+    "walls": [("id", "ID", 0.6), ("location", "Location", 1.5), ("length", "Length", 0.75), ("thickness", "Thick", 0.7),
+              ("type", "Type", 0.9), ("source", "Src", 0.6), ("notes", "Notes", 2.05)],
+    "openings": [("id", "ID", 0.6), ("type", "Type", 0.7), ("location", "Location", 1.5), ("width", "Width", 0.75),
+                 ("height", "Height", 0.75), ("source", "Src", 0.6), ("notes", "Notes", 2.2)],
 }
 
 
 def P(text, style="body"):
-    return Paragraph(escape(str(text or "")), S[style])
+    return Paragraph(escape("" if text is None else str(text)), S[style])
 
 
 def md_to_paras(text: str) -> list:
@@ -122,7 +122,10 @@ def build_report(project: dict, pages: list, images: dict, brand: dict, logo: by
     buf = io.BytesIO()
     company = brand.get("company_name") or "BuildSpec.ai"
     date = datetime.now(timezone.utc).strftime("%b %d, %Y")
-    logo_reader = ImageReader(io.BytesIO(logo)) if logo else None
+    try:
+        logo_reader = ImageReader(io.BytesIO(logo)) if logo else None
+    except Exception:
+        logo_reader = None
 
     def chrome(c, doc):
         c.saveState()
@@ -168,7 +171,7 @@ def build_report(project: dict, pages: list, images: dict, brand: dict, logo: by
                      P(pg.get("discipline"), "cell"), P(a.get("drawing_type"), "cell"),
                      P(len(a.get("rooms") or []), "cell"), P(len(a.get("walls") or []), "cell"), P(len(a.get("openings") or []), "cell")])
     t = grid(rows)
-    t._argW = [w * inch for w in (0.8, 2.4, 1.0, 1.3, 0.6, 0.6, 0.6)]
+    t._argW = [w * inch for w in (0.8, 2.2, 1.0, 1.2, 0.6, 0.6, 0.9)]
     flow += [t, PageBreak()]
 
     for pg in pages:

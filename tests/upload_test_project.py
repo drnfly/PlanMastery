@@ -1,0 +1,17 @@
+import os
+import sys
+import json
+import requests
+
+API = sys.argv[1] + "/api"
+path = sys.argv[2]
+name = sys.argv[3] if len(sys.argv) > 3 else "TEST_Planset"
+size = os.path.getsize(path)
+uid = requests.post(f"{API}/uploads/init", json={"filename": os.path.basename(path), "size": size}).json()["upload_id"]
+CH = 4 * 1024 * 1024
+with open(path, "rb") as f:
+    n = 0
+    while chunk := f.read(CH):
+        requests.put(f"{API}/uploads/{uid}/chunk/{n}", data=chunk).raise_for_status()
+        n += 1
+print(json.dumps(requests.post(f"{API}/uploads/{uid}/complete", json={"name": name}).json()))

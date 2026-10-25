@@ -288,9 +288,12 @@ async def scan_set(pid: str, background: BackgroundTasks):
     idxs = [t["index"] for t in todo]
     if idxs:
         await db.pages.update_many({"project_id": pid, "index": {"$in": idxs}}, {"$set": {"status": "analyzing", "error": None}})
-    for i in idxs:
-        background.add_task(run_analysis, pid, i)
+        background.add_task(scan_all, pid, idxs)
     return {"queued": len(idxs)}
+
+
+async def scan_all(pid: str, idxs: list):
+    await asyncio.gather(*[run_analysis(pid, i) for i in idxs])
 
 
 @api.get("/settings/brand")
@@ -312,6 +315,10 @@ async def put_logo(file: UploadFile = File(...)):
     data = await file.read()
     if len(data) > 5 * 1024 * 1024:
         raise HTTPException(400, "Logo must be under 5 MB")
+    try:
+        Image.open(io.BytesIO(data)).verify()
+    except Exception:
+        raise HTTPException(400, "Logo is not a valid image")
     path = (await asyncio.to_thread(put_object, f"{APP_NAME}/brand/{uuid.uuid4()}.{ext}", data, MIME[ext]))["path"]
     await db.settings.update_one({"id": "brand"}, {"$set": {"logo_path": path}}, upsert=True)
     return {"logo_path": path}
@@ -341,8 +348,10 @@ async def report(pid: str, body: ReportIn):
     if not pages:
         raise HTTPException(400, "No scanned sheets yet — scan the set first")
     stored = await get_brand()
-    brand = {**stored, **{k: v for k, v in body.brand.model_dump().items() if v}}
-    await db.settings.update_one({"id": "brand"}, {"$set": body.brand.model_dump()}, upsert=True)
+    given = body.brand.model_dump(exclude_unset=True) if "brand" in body.model_fields_set else {}
+    brand = {**stored, **given}
+    if given:
+        await db.settings.update_one({"id": "brand"}, {"$set": given}, upsert=True)
     logo = await fetch(stored["logo_path"]) if stored.get("logo_path") else None
     images = {pg["index"]: await fetch(pg["image_path"]) for pg in pages} if body.include_images else {}
     qa = []
@@ -420,7 +429,8 @@ async def chat(pid: str, body: ChatIn):
     current = next((pg for pg in pages if pg["index"] == body.page_index), pages[0])
     scope = "set" if body.scope == "set" and len(pages) > 1 else "sheet"
     history = await db.messages.find({"project_id": pid}, NO_ID).sort("created_at", 1).to_list(1000)
-    await db.messages.insert_one({"id": str(uuid.uuid4()), "project_id": pid, "role": "user", "content": question,
+    user_msg_id = str(uuid.uuid4())
+    await db.messages.insert_one({"id": user_msg_id, "project_id": pid, "role": "user", "content": question,
                                   "page_index": current["index"], "scope": scope, "created_at": now()})
 
     async def events():
@@ -462,6 +472,8 @@ async def chat(pid: str, body: ChatIn):
         if answer:
             await db.messages.insert_one({"id": str(uuid.uuid4()), "project_id": pid, "role": "assistant", "content": answer,
                                           "sources": [sheet_label(pg) for pg in used], "created_at": now()})
+        else:
+            await db.messages.delete_one({"id": user_msg_id})
         yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream",
@@ -479,6 +491,8 @@ async def cleanup_uploads():
 
 async def migrate_legacy():
     await cleanup_uploads()
+    await db.pages.update_many({"status": "analyzing"}, {"$set": {"status": "pending"}})
+    await db.pages.update_many({"model3d_status": "generating"}, {"$set": {"model3d_status": "none"}})
     async for p in db.projects.find({"page_count": {"$exists": False}, "storage_path": {"$exists": True}}, NO_ID):
         try:
             data = await fetch(p["storage_path"])
