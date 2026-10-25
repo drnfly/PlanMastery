@@ -26,7 +26,9 @@ ANALYSIS_PROMPT = """Analyze this construction drawing sheet ({sheet}) and retur
   "walls": [{{"id": "W1", "location": "", "length": "", "thickness": "", "type": "exterior | interior | load-bearing | partition | ICF | foundation", "source": "labeled | derived", "notes": ""}}],
   "openings": [{{"id": "D1", "type": "door | window | opening", "location": "", "width": "", "height": "", "source": "labeled | derived", "notes": ""}}],
   "summary": "2-4 sentence plain-English summary of this sheet, including any structural, ICF or waterproofing items",
-  "warnings": ["ambiguities, unreadable dimensions, code or constructability concerns"]
+  "warnings": ["ambiguities, unreadable dimensions, code or constructability concerns"],
+  "expert_notes": ["3-8 short, practical notes for field crews as a structural engineer / architect / ICF and waterproofing specialist: what to watch, sequencing, bracing, rebar, embedments, membranes, drainage, flashing"],
+  "digest": "dense, complete transcription of EVERYTHING written on this sheet so it can be searched later: every general note, spec, callout, schedule row, dimension string, rebar/footing/beam/header size, material, product name, elevation and grid reference (plain text, up to ~1500 words)"
 }}
 Keep native notation (e.g. 12'-6"). Use empty strings for unknown fields and empty arrays when the sheet has no such items.{hint}"""
 
@@ -108,6 +110,22 @@ async def analyze_sheet(file_path: str, mime: str, sheet: str, scale_hint: str) 
 
 async def model_sheet(image_path: str, sheet: str) -> dict:
     return _parse(await _collect(EXPERT, MODEL3D_PROMPT.format(sheet=sheet), [(image_path, "image/png")]))
+
+
+PICK_PROMPT = """You are routing a question about a construction plan set to the sheets most likely to contain the answer.
+QUESTION: {question}
+
+SHEET CATALOG:
+{catalog}
+
+Return ONLY a JSON array of up to {k} page numbers (integers), most relevant first, e.g. [4, 12]."""
+
+
+async def pick_sheets(question: str, catalog: str, k: int = 4) -> list:
+    try:
+        return [int(x) for x in _parse(await _collect(EXPERT, PICK_PROMPT.format(question=question, catalog=catalog, k=k), []), "[", "]")][:k]
+    except Exception:
+        return []
 
 
 def stream_chat(files: list, context: str, history: list, question: str):

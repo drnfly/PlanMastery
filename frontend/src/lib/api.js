@@ -11,6 +11,14 @@ export const generate3d = (id, idx) => axios.post(`${API}/projects/${id}/pages/$
 export const fetchPageImage = (id, idx) =>
   axios.get(`${API}/projects/${id}/pages/${idx}/image`, { responseType: "blob" }).then((r) => r.data);
 
+export const scanSet = (id) => axios.post(`${API}/projects/${id}/scan`).then((r) => r.data);
+export const getBrand = () => axios.get(`${API}/settings/brand`).then((r) => r.data);
+export const uploadLogo = (file) => { const fd = new FormData(); fd.append("file", file); return axios.post(`${API}/settings/brand/logo`, fd); };
+export const deleteLogo = () => axios.delete(`${API}/settings/brand/logo`);
+export const fetchLogo = () => axios.get(`${API}/settings/brand/logo`, { responseType: "blob" }).then((r) => r.data);
+export const downloadReport = (id, body) =>
+  axios.post(`${API}/projects/${id}/report`, body, { responseType: "blob" }).then((r) => r.data);
+
 const CHUNK = 4 * 1024 * 1024;
 
 const putChunk = async (url, blob, tries = 4) => {
@@ -30,11 +38,11 @@ export async function uploadPlans(file, name, scaleHint, onProgress) {
   return (await axios.post(`${API}/uploads/${upload_id}/complete`, { name, scale_hint: scaleHint })).data;
 }
 
-export async function streamChat(id, message, pageIndex, onDelta) {
+export async function streamChat(id, message, pageIndex, scope, { onDelta, onStatus, onSources }) {
   const res = await fetch(`${API}/projects/${id}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, page_index: pageIndex }),
+    body: JSON.stringify({ message, page_index: pageIndex, scope }),
   });
   if (!res.ok) throw new Error((await res.json()).detail || "Chat failed");
   const reader = res.body.getReader();
@@ -50,6 +58,8 @@ export async function streamChat(id, message, pageIndex, onDelta) {
       if (!p.startsWith("data: ")) continue;
       const ev = JSON.parse(p.slice(6));
       if (ev.error) throw new Error(ev.error);
+      if (ev.status) onStatus?.(ev.status);
+      if (ev.sources) onSources?.(ev.sources);
       if (ev.delta) onDelta(ev.delta);
     }
   }

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request, UploadFile, File
 from fastapi.responses import Response, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -20,9 +20,10 @@ import re  # noqa: E402
 import shutil  # noqa: E402
 import tempfile  # noqa: E402
 from PIL import Image  # noqa: E402
-from storage import init_storage, get_object  # noqa: E402
+from storage import init_storage, get_object, put_object, APP_NAME  # noqa: E402
 from processing import open_pdf, process_pdf_page, process_image  # noqa: E402
-from ai_engine import index_sheets, analyze_sheet, model_sheet, stream_chat, temp_file  # noqa: E402
+from ai_engine import index_sheets, analyze_sheet, model_sheet, stream_chat, temp_file, pick_sheets  # noqa: E402
+from report import build_report  # noqa: E402
 
 client = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = client[os.environ['DB_NAME']]
@@ -48,6 +49,25 @@ def now():
 class ChatIn(BaseModel):
     message: str
     page_index: int = 0
+    scope: str = "set"
+
+
+class Brand(BaseModel):
+    company_name: str = ""
+    prepared_by: str = ""
+    phone: str = ""
+    email: str = ""
+    client: str = ""
+
+
+class ReportIn(BaseModel):
+    brand: Brand = Brand()
+    include_images: bool = True
+    include_qa: bool = True
+    pages: list[int] | None = None
+
+
+SCAN_SEM = asyncio.Semaphore(3)
 
 
 class UploadInit(BaseModel):
@@ -143,8 +163,9 @@ async def run_analysis(pid: str, idx: int):
     pg = await get_page(pid, idx)
     try:
         data, ext, mime = await ai_source(pg)
-        with temp_file(data, ext) as path:
-            result = await analyze_sheet(path, mime, sheet_label(pg), p.get("scale_hint", ""))
+        async with SCAN_SEM:
+            with temp_file(data, ext) as path:
+                result = await analyze_sheet(path, mime, sheet_label(pg), p.get("scale_hint", ""))
         await set_page(pid, idx, {"status": "ready", "analysis": result, "error": None})
     except Exception as e:
         logger.exception("analysis failed")
@@ -259,6 +280,81 @@ async def analyze_page(pid: str, idx: int, background: BackgroundTasks):
     return {"status": "analyzing"}
 
 
+@api.post("/projects/{pid}/scan")
+async def scan_set(pid: str, background: BackgroundTasks):
+    await get_project(pid)
+    todo = await db.pages.find({"project_id": pid, "status": {"$ne": "analyzing"}, "$or": [
+        {"status": {"$in": ["pending", "failed"]}}, {"analysis.digest": {"$exists": False}}]}, {"_id": 0, "index": 1}).to_list(2000)
+    idxs = [t["index"] for t in todo]
+    if idxs:
+        await db.pages.update_many({"project_id": pid, "index": {"$in": idxs}}, {"$set": {"status": "analyzing", "error": None}})
+    for i in idxs:
+        background.add_task(run_analysis, pid, i)
+    return {"queued": len(idxs)}
+
+
+@api.get("/settings/brand")
+async def get_brand():
+    return await db.settings.find_one({"id": "brand"}, {"_id": 0, "id": 0}) or {}
+
+
+@api.put("/settings/brand")
+async def put_brand(body: Brand):
+    await db.settings.update_one({"id": "brand"}, {"$set": body.model_dump()}, upsert=True)
+    return await get_brand()
+
+
+@api.post("/settings/brand/logo")
+async def put_logo(file: UploadFile = File(...)):
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in ("png", "jpg", "jpeg"):
+        raise HTTPException(400, "Logo must be PNG or JPG")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Logo must be under 5 MB")
+    path = (await asyncio.to_thread(put_object, f"{APP_NAME}/brand/{uuid.uuid4()}.{ext}", data, MIME[ext]))["path"]
+    await db.settings.update_one({"id": "brand"}, {"$set": {"logo_path": path}}, upsert=True)
+    return {"logo_path": path}
+
+
+@api.get("/settings/brand/logo")
+async def get_logo():
+    b = await get_brand()
+    if not b.get("logo_path"):
+        raise HTTPException(404, "No logo")
+    return Response(content=await fetch(b["logo_path"]), media_type=MIME[b["logo_path"].rsplit(".", 1)[-1]])
+
+
+@api.delete("/settings/brand/logo")
+async def delete_logo():
+    await db.settings.update_one({"id": "brand"}, {"$unset": {"logo_path": ""}})
+    return {"ok": True}
+
+
+@api.post("/projects/{pid}/report")
+async def report(pid: str, body: ReportIn):
+    p = await get_project(pid)
+    q = {"project_id": pid, "status": "ready", "analysis": {"$ne": None}}
+    if body.pages is not None:
+        q["index"] = {"$in": body.pages}
+    pages = await db.pages.find(q, PAGE_LIST).sort("index", 1).to_list(2000)
+    if not pages:
+        raise HTTPException(400, "No scanned sheets yet — scan the set first")
+    stored = await get_brand()
+    brand = {**stored, **{k: v for k, v in body.brand.model_dump().items() if v}}
+    await db.settings.update_one({"id": "brand"}, {"$set": body.brand.model_dump()}, upsert=True)
+    logo = await fetch(stored["logo_path"]) if stored.get("logo_path") else None
+    images = {pg["index"]: await fetch(pg["image_path"]) for pg in pages} if body.include_images else {}
+    qa = []
+    if body.include_qa:
+        msgs = await db.messages.find({"project_id": pid}, NO_ID).sort("created_at", 1).to_list(1000)
+        qa = [(m["content"], n["content"]) for m, n in zip(msgs, msgs[1:]) if m["role"] == "user" and n["role"] == "assistant"]
+    pdf = await asyncio.to_thread(build_report, p, pages, images, brand, logo, qa)
+    fname = re.sub(r"[^A-Za-z0-9_-]+", "_", p["name"])[:60] + "_takeoff_report.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
 @api.post("/projects/{pid}/pages/{idx}/model3d")
 async def model_page(pid: str, idx: int, background: BackgroundTasks):
     await get_page(pid, idx, PAGE_LIST)
@@ -285,12 +381,29 @@ def relevant_pages(pages: list, question: str, exclude: int, k: int = 2) -> list
     return [pg for _, pg in sorted(scored, key=lambda x: -x[0])[:k]]
 
 
-def build_context(pages: list, current: dict, extra: list) -> str:
+def build_context(pages: list, current: dict, extra: list, scope: str = "sheet") -> str:
     index = "\n".join(f"- Page {pg['index'] + 1}: {sheet_label(pg)} [{pg.get('discipline', '')}]" for pg in pages)
-    takeoffs = json.dumps({sheet_label(pg): pg["analysis"] for pg in pages if pg.get("analysis")})[:30000]
+    slim = {sheet_label(pg): {k: v for k, v in pg["analysis"].items() if k != "digest"} for pg in pages if pg.get("analysis")}
+    takeoffs = json.dumps(slim)[:60000]
     attached = ", ".join(sheet_label(pg) for pg in [current, *extra])
-    return (f"PLAN SET SHEET INDEX:\n{index}\n\nATTACHED SHEETS (in order): {attached}\n"
-            f"The user is currently viewing: {sheet_label(current)}\n\nPRIOR TAKEOFFS (JSON):\n{takeoffs or '(none yet)'}")
+    ctx = (f"PLAN SET SHEET INDEX:\n{index}\n\nATTACHED SHEET IMAGES/PDFs (in order): {attached}\n"
+           f"The user is currently viewing: {sheet_label(current)}\n\nPRIOR TAKEOFFS (JSON):\n{takeoffs or '(none yet)'}")
+    if scope == "set":
+        notes = []
+        for pg in pages:
+            body = (pg.get("analysis") or {}).get("digest") or (pg.get("text") or "")[:2500]
+            notes.append(f"=== {sheet_label(pg)} (page {pg['index'] + 1}) ===\n{body.strip() or '(no readable text; not scanned yet)'}")
+        ctx += ("\n\nFULL-SET SEARCH: the question applies to the ENTIRE plan set. Below is the transcribed content of every sheet. "
+                "Search all of it, combine information across sheets, and cite every sheet you used.\n\n" + "\n\n".join(notes)[:250000])
+    return ctx
+
+
+def catalog(pages: list) -> str:
+    lines = []
+    for pg in pages:
+        body = ((pg.get("analysis") or {}).get("digest") or pg.get("text") or "").replace("\n", " ")
+        lines.append(f"Page {pg['index'] + 1}: {sheet_label(pg)} [{pg.get('discipline', '')}] — {body[:350]}")
+    return "\n".join(lines)
 
 
 @api.post("/projects/{pid}/chat")
@@ -302,26 +415,41 @@ async def chat(pid: str, body: ChatIn):
     if p["status"] != "ready":
         raise HTTPException(400, "Plans are still processing")
     pages = await db.pages.find({"project_id": pid}, NO_ID).sort("index", 1).to_list(2000)
+    if not pages:
+        raise HTTPException(400, "No sheets in this project")
     current = next((pg for pg in pages if pg["index"] == body.page_index), pages[0])
-    extra = relevant_pages(pages, question, current["index"])
-    sources = [await ai_source(pg) for pg in [current, *extra]]
-    while len(sources) > 1 and sum(len(s[0]) for s in sources) > 30 * 1024 * 1024:
-        sources.pop()
-        extra.pop()
+    scope = "set" if body.scope == "set" and len(pages) > 1 else "sheet"
     history = await db.messages.find({"project_id": pid}, NO_ID).sort("created_at", 1).to_list(1000)
     await db.messages.insert_one({"id": str(uuid.uuid4()), "project_id": pid, "role": "user", "content": question,
-                                  "page_index": current["index"], "created_at": now()})
-    context = build_context(pages, current, extra)
+                                  "page_index": current["index"], "scope": scope, "created_at": now()})
 
     async def events():
         answer = ""
         paths = []
+        used = []
         try:
+            if scope == "set":
+                scanned = sum(1 for pg in pages if (pg.get("analysis") or {}).get("digest"))
+                yield f"data: {json.dumps({'status': f'Searching all {len(pages)} sheets ({scanned} fully scanned)…'})}\n\n"
+                picks = await pick_sheets(question, catalog(pages))
+                by_num = {pg["index"] + 1: pg for pg in pages}
+                chosen = [by_num[n] for n in picks if n in by_num] or [current]
+            else:
+                chosen = [current, *relevant_pages(pages, question, current["index"])]
+            sources = []
+            for pg in chosen:
+                src = await ai_source(pg)
+                if sources and sum(len(s[0]) for s in sources) + len(src[0]) > 30 * 1024 * 1024:
+                    break
+                sources.append(src)
+                used.append(pg)
+            yield f"data: {json.dumps({'sources': [sheet_label(pg) for pg in used]})}\n\n"
             for data, ext, _ in sources:
                 path = Path(tempfile.gettempdir()) / f"{uuid.uuid4()}.{ext}"
                 path.write_bytes(data)
                 paths.append(str(path))
             files = [(path, mime) for path, (_, _, mime) in zip(paths, sources)]
+            context = build_context(pages, used[0], used[1:], scope)
             async for tok in stream_chat(files, context, history, question):
                 answer += tok
                 yield f"data: {json.dumps({'delta': tok})}\n\n"
@@ -332,8 +460,8 @@ async def chat(pid: str, body: ChatIn):
             for path in paths:
                 Path(path).unlink(missing_ok=True)
         if answer:
-            await db.messages.insert_one({"id": str(uuid.uuid4()), "project_id": pid, "role": "assistant",
-                                          "content": answer, "created_at": now()})
+            await db.messages.insert_one({"id": str(uuid.uuid4()), "project_id": pid, "role": "assistant", "content": answer,
+                                          "sources": [sheet_label(pg) for pg in used], "created_at": now()})
         yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream",

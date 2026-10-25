@@ -9,6 +9,7 @@ import { DimensionTable } from "@/components/app/DimensionTable";
 import { ChatPanel } from "@/components/app/ChatPanel";
 import { AnalysisSummary } from "@/components/app/AnalysisSummary";
 import { SheetStrip } from "@/components/app/SheetStrip";
+import { SetToolbar } from "@/components/app/SetToolbar";
 
 const busy = (p, i) => p.status === "processing" || p.pages?.some((pg) => pg.status === "analyzing" || pg.model3d_status === "generating") || p.pages?.[i]?.status === "pending";
 
@@ -71,6 +72,7 @@ export default function Workspace() {
             </div>
           ) : (
             <>
+              <SetToolbar project={project} onChange={poke} />
               <SheetStrip pages={project.pages} active={pageIdx} onSelect={setPageIdx} />
               <BlueprintViewer project={project} page={page} onChange={poke} />
               <AnalysisSummary project={project} page={page} onChange={poke} />
