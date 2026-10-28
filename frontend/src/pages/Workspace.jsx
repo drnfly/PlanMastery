@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Ruler, Loader2, AlertTriangle } from "lucide-react";
+import { Ruler, Loader2, AlertTriangle, Layers, Boxes, Droplets, Camera } from "lucide-react";
 import { listProjects, getProject, analyzePage } from "@/lib/api";
 import { Sidebar } from "@/components/app/Sidebar";
 import { UploadPanel } from "@/components/app/UploadPanel";
@@ -10,8 +10,14 @@ import { ChatPanel } from "@/components/app/ChatPanel";
 import { AnalysisSummary } from "@/components/app/AnalysisSummary";
 import { SheetStrip } from "@/components/app/SheetStrip";
 import { SetToolbar } from "@/components/app/SetToolbar";
+import { IcfEstimator } from "@/components/app/IcfEstimator";
+import { WaterproofingChecklist } from "@/components/app/WaterproofingChecklist";
+import { PhotosPanel } from "@/components/app/PhotosPanel";
 
-const busy = (p, i) => p.status === "processing" || p.pages?.some((pg) => pg.status === "analyzing" || pg.model3d_status === "generating") || p.pages?.[i]?.status === "pending";
+const TABS = [["sheets", "Sheets", Layers], ["icf", "ICF estimator", Boxes], ["waterproofing", "Waterproofing", Droplets], ["photos", "Job photos", Camera]];
+
+const busy = (p, i) => p.status === "processing" || p.pages?.some((pg) => pg.status === "analyzing" || pg.model3d_status === "generating")
+  || p.pages?.[i]?.status === "pending" || Object.values(p.tools || {}).some((t) => t.status === "running");
 
 export default function Workspace() {
   const [projects, setProjects] = useState([]);
@@ -19,12 +25,13 @@ export default function Workspace() {
   const [project, setProject] = useState(null);
   const [pageIdx, setPageIdx] = useState(0);
   const [tick, setTick] = useState(0);
+  const [view, setView] = useState("sheets");
 
   const refreshList = useCallback(() => listProjects().then(setProjects).catch(() => toast.error("Could not load projects")), []);
   const poke = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => { refreshList(); }, [refreshList]);
-  useEffect(() => { setPageIdx(0); }, [activeId]);
+  useEffect(() => { setPageIdx(0); setView("sheets"); }, [activeId]);
 
   useEffect(() => {
     if (!activeId) { setProject(null); return; }
@@ -73,10 +80,25 @@ export default function Workspace() {
           ) : (
             <>
               <SetToolbar project={project} onChange={poke} />
-              <SheetStrip pages={project.pages} active={pageIdx} onSelect={setPageIdx} />
-              <BlueprintViewer project={project} page={page} onChange={poke} />
-              <AnalysisSummary project={project} page={page} onChange={poke} />
-              <DimensionTable project={project} page={page} />
+              <div className="flex gap-1 bg-[#111827] border border-slate-800 rounded-xl p-1 overflow-x-auto" data-testid="project-tabs">
+                {TABS.map(([k, l, Icon]) => (
+                  <button key={k} data-testid={`project-tab-${k}`} onClick={() => setView(k)}
+                    className={`flex-1 min-w-max flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${view === k ? "bg-amber-500 text-[#0B0F17]" : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/60"}`}>
+                    <Icon className="h-4 w-4" />{l}{project.tools?.[k]?.status === "running" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  </button>
+                ))}
+              </div>
+              {view === "sheets" && (
+                <>
+                  <SheetStrip pages={project.pages} active={pageIdx} onSelect={setPageIdx} />
+                  <BlueprintViewer project={project} page={page} onChange={poke} />
+                  <AnalysisSummary project={project} page={page} onChange={poke} />
+                  <DimensionTable project={project} page={page} />
+                </>
+              )}
+              {view === "icf" && <IcfEstimator project={project} onChange={poke} />}
+              {view === "waterproofing" && <WaterproofingChecklist project={project} onChange={poke} />}
+              {view === "photos" && <PhotosPanel project={project} />}
             </>
           )}
         </section>

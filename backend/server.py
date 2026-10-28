@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request, UploadFile, File, Form
 from fastapi.responses import Response, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -19,11 +19,14 @@ import io  # noqa: E402
 import re  # noqa: E402
 import shutil  # noqa: E402
 import tempfile  # noqa: E402
-from PIL import Image  # noqa: E402
+from PIL import Image, ImageOps  # noqa: E402
 from storage import init_storage, get_object, put_object, APP_NAME  # noqa: E402
 from processing import open_pdf, process_pdf_page, process_image  # noqa: E402
 from ai_engine import index_sheets, analyze_sheet, model_sheet, stream_chat, temp_file, pick_sheets  # noqa: E402
 from report import build_report  # noqa: E402
+from icf_calc import compute as icf_compute  # noqa: E402
+from set_tools import ICF_PROMPT, WP_PROMPT, CREWS, set_json, crew_prompt, analyze_photo, photo_followup  # noqa: E402
+from contextlib import ExitStack  # noqa: E402
 
 client = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = client[os.environ['DB_NAME']]
@@ -65,6 +68,31 @@ class ReportIn(BaseModel):
     include_images: bool = True
     include_qa: bool = True
     pages: list[int] | None = None
+    crew: str = "full"
+
+
+class IcfEdit(BaseModel):
+    walls: list[dict]
+    footings: list[dict]
+    params: dict = {}
+
+
+class WpPatch(BaseModel):
+    verified: bool
+
+
+class PhotoAsk(BaseModel):
+    question: str
+
+
+TOOLS = {"icf", "waterproofing", "crew_foundation", "crew_icf", "crew_waterproofing"}
+TOOL_QUERY = {
+    "icf": "ICF foundation walls, wall sections, foundation plan, footings, rebar schedule, structural notes",
+    "waterproofing": "waterproofing, foundation details, wall sections, drain tile, flashing, roof, envelope details",
+    "crew_foundation": "foundation plan, footings, slab, drain tile, structural notes",
+    "crew_icf": "ICF walls, wall sections, rebar, openings, foundation plan, structural notes",
+    "crew_waterproofing": "waterproofing, drainage, flashing, foundation details, wall sections",
+}
 
 
 SCAN_SEM = asyncio.Semaphore(3)
@@ -341,11 +369,21 @@ async def delete_logo():
 @api.post("/projects/{pid}/report")
 async def report(pid: str, body: ReportIn):
     p = await get_project(pid)
+    tools = p.get("tools") or {}
     q = {"project_id": pid, "status": "ready", "analysis": {"$ne": None}}
-    if body.pages is not None:
+    packet = None
+    if body.crew != "full":
+        if body.crew not in CREWS:
+            raise HTTPException(400, "Unknown crew")
+        t = tools.get(f"crew_{body.crew}") or {}
+        if t.get("status") != "ready":
+            raise HTTPException(400, "Prepare the crew packet first")
+        packet = t["data"]
+        q["index"] = {"$in": [int(n) - 1 for n in packet.get("sheets", []) if str(n).isdigit() or isinstance(n, int)]}
+    elif body.pages is not None:
         q["index"] = {"$in": body.pages}
     pages = await db.pages.find(q, PAGE_LIST).sort("index", 1).to_list(2000)
-    if not pages:
+    if not pages and not packet:
         raise HTTPException(400, "No scanned sheets yet — scan the set first")
     stored = await get_brand()
     given = body.brand.model_dump(exclude_unset=True) if "brand" in body.model_fields_set else {}
@@ -355,13 +393,198 @@ async def report(pid: str, body: ReportIn):
     logo = await fetch(stored["logo_path"]) if stored.get("logo_path") else None
     images = {pg["index"]: await fetch(pg["image_path"]) for pg in pages} if body.include_images else {}
     qa = []
-    if body.include_qa:
+    if body.include_qa and body.crew == "full":
         msgs = await db.messages.find({"project_id": pid}, NO_ID).sort("created_at", 1).to_list(1000)
         qa = [(m["content"], n["content"]) for m, n in zip(msgs, msgs[1:]) if m["role"] == "user" and n["role"] == "assistant"]
-    pdf = await asyncio.to_thread(build_report, p, pages, images, brand, logo, qa)
-    fname = re.sub(r"[^A-Za-z0-9_-]+", "_", p["name"])[:60] + "_takeoff_report.pdf"
+    extras = {"crew": body.crew, "packet": packet}
+    if body.crew in ("full", "foundation", "icf") and (tools.get("icf") or {}).get("status") == "ready":
+        extras["icf"] = tools["icf"]["data"]
+    if body.crew in ("full", "foundation", "waterproofing") and (tools.get("waterproofing") or {}).get("status") == "ready":
+        extras["wp"] = tools["waterproofing"]["data"]
+    pdf = await asyncio.to_thread(build_report, p, pages, images, brand, logo, qa, extras)
+    suffix = "takeoff_report" if body.crew == "full" else f"{body.crew}_crew_packet"
+    fname = re.sub(r"[^A-Za-z0-9_-]+", "_", p["name"])[:60] + f"_{suffix}.pdf"
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+def set_context(pages: list) -> str:
+    slim = {sheet_label(pg): {k: v for k, v in pg["analysis"].items() if k != "digest"} for pg in pages if pg.get("analysis")}
+    notes = [f"=== {sheet_label(pg)} (page {pg['index'] + 1}) ===\n"
+             f"{((pg.get('analysis') or {}).get('digest') or (pg.get('text') or '')[:2500]).strip() or '(no readable text)'}"
+             for pg in pages]
+    return (f"PRIOR TAKEOFFS (JSON):\n{json.dumps(slim)[:60000]}\n\nSHEET TRANSCRIPTIONS:\n" + "\n\n".join(notes)[:250000])
+
+
+async def picked_sources(pages: list, query: str, k: int = 4, budget: int = 30 * 1024 * 1024) -> list:
+    by_num = {pg["index"] + 1: pg for pg in pages}
+    chosen = [by_num[n] for n in await pick_sheets(query, catalog(pages), k) if n in by_num]
+    out, size = [], 0
+    for pg in chosen:
+        data, ext, mime = await ai_source(pg)
+        if out and size + len(data) > budget:
+            break
+        size += len(data)
+        out.append((data, ext, mime))
+    return out
+
+
+async def project_pages(pid: str) -> list:
+    return await db.pages.find({"project_id": pid}, NO_ID).sort("index", 1).to_list(2000)
+
+
+async def set_tool(pid: str, tool: str, fields: dict):
+    await db.projects.update_one({"id": pid}, {"$set": {f"tools.{tool}.{k}": v for k, v in fields.items()}})
+
+
+async def run_tool(pid: str, tool: str):
+    try:
+        pages = await project_pages(pid)
+        srcs = await picked_sources(pages, TOOL_QUERY[tool])
+        with ExitStack() as st:
+            files = [(st.enter_context(temp_file(d, e)), m) for d, e, m in srcs]
+            prompt = ICF_PROMPT if tool == "icf" else WP_PROMPT if tool == "waterproofing" else crew_prompt(tool[5:])
+            data = await set_json(prompt, set_context(pages), files)
+        if tool == "icf":
+            data = {"extract": data, "calc": icf_compute(data.get("walls", []), data.get("footings", []), {})}
+        if tool == "waterproofing":
+            for it in data.get("items", []):
+                it["verified"] = False
+        await set_tool(pid, tool, {"status": "ready", "data": data, "error": None, "updated_at": now()})
+    except Exception as e:
+        logger.exception(f"tool {tool} failed")
+        await set_tool(pid, tool, {"status": "failed", "error": str(e)[:300]})
+
+
+@api.post("/projects/{pid}/tools/{tool}")
+async def start_tool(pid: str, tool: str, background: BackgroundTasks):
+    p = await get_project(pid)
+    if tool not in TOOLS:
+        raise HTTPException(404, "Unknown tool")
+    if p["status"] != "ready":
+        raise HTTPException(400, "Plans are still processing")
+    await set_tool(pid, tool, {"status": "running", "error": None})
+    background.add_task(run_tool, pid, tool)
+    return {"status": "running"}
+
+
+@api.put("/projects/{pid}/tools/icf")
+async def edit_icf(pid: str, body: IcfEdit):
+    p = await get_project(pid)
+    t = (p.get("tools") or {}).get("icf") or {}
+    if t.get("status") != "ready":
+        raise HTTPException(400, "Build the ICF estimate first")
+    data = t["data"]
+    data["extract"]["walls"], data["extract"]["footings"] = body.walls, body.footings
+    data["calc"] = icf_compute(body.walls, body.footings, body.params)
+    await set_tool(pid, "icf", {"data": data})
+    return data
+
+
+@api.patch("/projects/{pid}/tools/waterproofing/items/{i}")
+async def patch_wp(pid: str, i: int, body: WpPatch):
+    p = await get_project(pid)
+    items = (((p.get("tools") or {}).get("waterproofing") or {}).get("data") or {}).get("items") or []
+    if not 0 <= i < len(items):
+        raise HTTPException(404, "Item not found")
+    await db.projects.update_one({"id": pid}, {"$set": {f"tools.waterproofing.data.items.{i}.verified": body.verified}})
+    return {"ok": True}
+
+
+PHOTO_EXT = {"png", "jpg", "jpeg", "webp"}
+
+
+async def photo_inputs(pid: str, photo: dict, query: str):
+    pages = await project_pages(pid)
+    srcs = await picked_sources(pages, query, k=3, budget=25 * 1024 * 1024) if pages else []
+    return pages, [(await fetch(photo["image_path"]), "jpg", "image/jpeg"), *srcs]
+
+
+async def run_photo(photo_id: str, question: str | None = None):
+    photo = await db.photos.find_one({"id": photo_id}, NO_ID)
+    try:
+        pages, srcs = await photo_inputs(photo["project_id"], photo, question or photo.get("note") or "site photo construction progress")
+        with ExitStack() as st:
+            files = [(st.enter_context(temp_file(d, e)), m) for d, e, m in srcs]
+            ctx = set_context(pages) if pages else "(no plan sheets)"
+            if question:
+                answer = await photo_followup(json.dumps(photo.get("analysis")), question, ctx, files)
+                await db.photos.update_one({"id": photo_id}, {"$set": {"status": "ready"},
+                                                              "$push": {"thread": {"q": question, "a": answer, "created_at": now()}}})
+                return
+            analysis = await analyze_photo(photo.get("note", ""), ctx, files)
+        await db.photos.update_one({"id": photo_id}, {"$set": {"status": "ready", "analysis": analysis, "error": None}})
+    except Exception as e:
+        logger.exception("photo analysis failed")
+        await db.photos.update_one({"id": photo_id}, {"$set": {"status": "failed", "error": str(e)[:300]}})
+
+
+@api.post("/projects/{pid}/photos")
+async def upload_photo(pid: str, background: BackgroundTasks, file: UploadFile = File(...), note: str = Form("")):
+    await get_project(pid)
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in PHOTO_EXT:
+        raise HTTPException(400, "Photo must be JPG, PNG or WEBP")
+    raw = await file.read()
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(400, "Photo must be under 25 MB")
+    try:
+        img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+    except Exception:
+        raise HTTPException(400, "Not a valid image")
+    img.thumbnail((2000, 2000))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=85)
+    path = (await asyncio.to_thread(put_object, f"{APP_NAME}/photos/{pid}/{uuid.uuid4()}.jpg", buf.getvalue(), "image/jpeg"))["path"]
+    doc = {"id": str(uuid.uuid4()), "project_id": pid, "image_path": path, "note": note.strip(), "original_filename": file.filename,
+           "status": "analyzing", "analysis": None, "error": None, "thread": [], "is_deleted": False, "created_at": now()}
+    await db.photos.insert_one(doc)
+    background.add_task(run_photo, doc["id"])
+    doc.pop("_id", None)
+    return doc
+
+
+@api.get("/projects/{pid}/photos")
+async def list_photos(pid: str):
+    return await db.photos.find({"project_id": pid, "is_deleted": False}, NO_ID).sort("created_at", -1).to_list(500)
+
+
+async def get_photo(photo_id: str) -> dict:
+    ph = await db.photos.find_one({"id": photo_id, "is_deleted": False}, NO_ID)
+    if not ph:
+        raise HTTPException(404, "Photo not found")
+    return ph
+
+
+@api.get("/photos/{photo_id}/image")
+async def photo_image(photo_id: str):
+    ph = await get_photo(photo_id)
+    return Response(content=await fetch(ph["image_path"]), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@api.post("/photos/{photo_id}/ask")
+async def ask_photo(photo_id: str, body: PhotoAsk, background: BackgroundTasks):
+    ph = await get_photo(photo_id)
+    if ph["status"] != "ready" or not body.question.strip():
+        raise HTTPException(400, "Photo is not ready or question is empty")
+    await db.photos.update_one({"id": photo_id}, {"$set": {"status": "answering"}})
+    background.add_task(run_photo, photo_id, body.question.strip())
+    return {"status": "answering"}
+
+
+@api.post("/photos/{photo_id}/reanalyze")
+async def reanalyze_photo(photo_id: str, background: BackgroundTasks):
+    await get_photo(photo_id)
+    await db.photos.update_one({"id": photo_id}, {"$set": {"status": "analyzing", "error": None}})
+    background.add_task(run_photo, photo_id)
+    return {"status": "analyzing"}
+
+
+@api.delete("/photos/{photo_id}")
+async def delete_photo(photo_id: str):
+    await get_photo(photo_id)
+    await db.photos.update_one({"id": photo_id}, {"$set": {"is_deleted": True}})
+    return {"ok": True}
 
 
 @api.post("/projects/{pid}/pages/{idx}/model3d")
@@ -493,6 +716,10 @@ async def migrate_legacy():
     await cleanup_uploads()
     await db.pages.update_many({"status": "analyzing"}, {"$set": {"status": "pending"}})
     await db.pages.update_many({"model3d_status": "generating"}, {"$set": {"model3d_status": "none"}})
+    for tool in TOOLS:
+        await db.projects.update_many({f"tools.{tool}.status": "running"},
+                                      {"$set": {f"tools.{tool}.status": "failed", f"tools.{tool}.error": "Interrupted — run again"}})
+    await db.photos.update_many({"status": {"$in": ["analyzing", "answering"]}}, {"$set": {"status": "failed", "error": "Interrupted — re-run"}})
     async for p in db.projects.find({"page_count": {"$exists": False}, "storage_path": {"$exists": True}}, NO_ID):
         try:
             data = await fetch(p["storage_path"])

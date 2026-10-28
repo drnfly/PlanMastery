@@ -38,7 +38,7 @@ export const SetToolbar = ({ project, onChange }) => {
         className="flex items-center gap-2 rounded-md bg-amber-500 text-[#0B0F17] font-semibold px-3 py-2 text-sm hover:bg-amber-400 disabled:opacity-40 active:scale-95 transition-[background-color,transform]">
         <FileDown className="h-4 w-4" /> PDF report
       </button>
-      <ReportDialog open={open} onOpenChange={setOpen} project={project} scannedCount={scanned} />
+      <ReportDialog open={open} onOpenChange={setOpen} project={project} scannedCount={scanned} onChange={onChange} />
     </div>
   );
 };

@@ -18,6 +18,18 @@ export const deleteLogo = () => axios.delete(`${API}/settings/brand/logo`);
 export const fetchLogo = () => axios.get(`${API}/settings/brand/logo`, { responseType: "blob" }).then((r) => r.data);
 export const downloadReport = (id, body) =>
   axios.post(`${API}/projects/${id}/report`, body, { responseType: "blob" }).then((r) => r.data);
+export const runTool = (id, tool) => axios.post(`${API}/projects/${id}/tools/${tool}`);
+export const editIcf = (id, body) => axios.put(`${API}/projects/${id}/tools/icf`, body).then((r) => r.data);
+export const patchWp = (id, i, verified) => axios.patch(`${API}/projects/${id}/tools/waterproofing/items/${i}`, { verified });
+export const listPhotos = (id) => axios.get(`${API}/projects/${id}/photos`).then((r) => r.data);
+export const uploadPhoto = (id, file, note) => {
+  const fd = new FormData(); fd.append("file", file); fd.append("note", note);
+  return axios.post(`${API}/projects/${id}/photos`, fd).then((r) => r.data);
+};
+export const fetchPhoto = (pid) => axios.get(`${API}/photos/${pid}/image`, { responseType: "blob" }).then((r) => r.data);
+export const askPhoto = (pid, question) => axios.post(`${API}/photos/${pid}/ask`, { question });
+export const reanalyzePhoto = (pid) => axios.post(`${API}/photos/${pid}/reanalyze`);
+export const deletePhoto = (pid) => axios.delete(`${API}/photos/${pid}`);
 
 const CHUNK = 4 * 1024 * 1024;
 

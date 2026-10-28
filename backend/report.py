@@ -118,7 +118,82 @@ def sheet_section(pg: dict, image: bytes | None) -> list:
     return flow + [PageBreak()]
 
 
-def build_report(project: dict, pages: list, images: dict, brand: dict, logo: bytes | None, qa: list) -> bytes:
+def bullets(items: list, mark: str = "•") -> list:
+    return [Paragraph(escape(str(n)), S["bullet"], bulletText=mark) for n in items or []]
+
+
+def simple_table(headers: list, rows: list, widths: list, bg=INK) -> Table:
+    t = grid([[P(h, "head") for h in headers]] + [[P(c, "cell") for c in r] for r in rows], bg)
+    t._argW = [w * inch for w in widths]
+    return t
+
+
+CREW_TITLES = {"foundation": "FOUNDATION CREW PACKET", "icf": "ICF WALL CREW PACKET", "waterproofing": "WATERPROOFING CREW PACKET"}
+
+
+def crew_section(packet: dict) -> list:
+    flow = [P("Crew briefing", "h2"), P(packet.get("scope"))]
+    for key, title, mark in [("sequence", "Work sequence", "•"), ("notes", "Expert notes for crews", "•"),
+                             ("materials", "Materials & specs from plans", "•"), ("inspections", "Hold points & inspections", "✓"),
+                             ("rfis", "Open questions / RFIs", "?")]:
+        if packet.get(key):
+            flow += [P(title, "h3")] + bullets(packet[key], mark)
+    return flow + [PageBreak()]
+
+
+def icf_section(icf: dict) -> list:
+    ex, calc = icf.get("extract") or {}, icf.get("calc") or {}
+    t, pr = calc.get("totals") or {}, calc.get("params") or {}
+    flow = [P("ICF material estimate", "h2"),
+            P(f"System: {ex.get('system') or 'not specified'} · Block {pr.get('block_length_in')}\"x{pr.get('block_height_in')}\" · "
+              f"waste {pr.get('waste_pct')}% · concrete overage {pr.get('concrete_overage_pct')}% · "
+              f"{pr.get('stock_length_ft')}' bar stock · lap {pr.get('lap_bar_diameters')} bar dia.", "meta"), Spacer(1, 6),
+            simple_table(["Straight blocks", "Corner blocks", "Wall concrete", "Footing concrete", "Total concrete", "Rebar weight"],
+                         [[t.get("straight_blocks"), t.get("corner_blocks"), f"{t.get('wall_cy')} yd³", f"{t.get('footing_cy')} yd³",
+                           f"{t.get('total_cy')} yd³", f"{t.get('rebar_lb')} lb"]], [1.2] * 6, AMBER)]
+    calc_by_id = {r["id"]: r for r in calc.get("walls", [])}
+    if ex.get("walls"):
+        rows = [[w.get("id"), w.get("location"), w.get("length_ft"), w.get("height_ft"), w.get("core_in"),
+                 calc_by_id.get(w.get("id"), {}).get("straight_blocks"), calc_by_id.get(w.get("id"), {}).get("concrete_cy"),
+                 f"{w.get('vertical_bar') or '—'} @ {w.get('vertical_spacing_in') or '—'}\"",
+                 f"({w.get('horizontal_bars_per_row') or '—'}) {w.get('horizontal_bar') or '—'} / {w.get('horizontal_every_courses') or '—'} crs"]
+                for w in ex["walls"]]
+        flow += [P("ICF wall runs", "h3"), simple_table(["ID", "Location", "L ft", "H ft", "Core in", "Blocks", "yd³", "Vertical", "Horizontal"],
+                                                        rows, [0.45, 1.75, 0.5, 0.5, 0.55, 0.6, 0.55, 1.0, 1.4])]
+    if ex.get("footings"):
+        fc = {r["id"]: r for r in calc.get("footings", [])}
+        rows = [[f.get("id"), f.get("location"), f.get("length_ft"), f"{f.get('width_in')}\" x {f.get('depth_in')}\"",
+                 f"({f.get('bar_count')}) {f.get('bars')}", fc.get(f.get("id"), {}).get("concrete_cy")] for f in ex["footings"]]
+        flow += [P("Footings", "h3"), simple_table(["ID", "Location", "L ft", "W x D", "Bars", "yd³"], rows, [0.5, 2.6, 0.7, 1.2, 1.2, 1.1])]
+    if calc.get("rebar"):
+        flow += [P("Rebar order", "h3"), simple_table(["Size", "Linear ft", "Sticks", "Stock", "Weight lb"],
+                                                      [[r["size"], r["lf"], r["sticks"], f"{r['stock_ft']}'", r["weight_lb"]] for r in calc["rebar"]],
+                                                      [1.2, 1.5, 1.2, 1.2, 1.5])]
+    if ex.get("assumptions"):
+        flow += [P("Assumptions", "h3")] + bullets(ex["assumptions"])
+    if ex.get("missing"):
+        flow += [P("Missing from plans — confirm before ordering", "h3")] + bullets(ex["missing"], "!")
+    return flow + [PageBreak()]
+
+
+def wp_section(wp: dict) -> list:
+    items = wp.get("items") or []
+    counts = {s: sum(1 for i in items if i.get("status") == s) for s in ("specified", "missing", "unclear")}
+    flow = [P("Waterproofing checklist", "h2"),
+            P(f"{counts['specified']} specified · {counts['missing']} missing · {counts['unclear']} unclear · "
+              f"{sum(1 for i in items if i.get('verified'))} verified on site", "meta"), Spacer(1, 4), P(wp.get("summary"))]
+    order = {"missing": 0, "unclear": 1, "specified": 2}
+    rows = [["✓" if i.get("verified") else "☐", (i.get("status") or "").upper(), (i.get("severity") or "").upper(),
+             f"{i.get('category')}: {i.get('item')}", i.get("spec") or "—", i.get("recommendation"), ", ".join(i.get("sheets") or [])]
+            for i in sorted(items, key=lambda i: order.get(i.get("status"), 3))]
+    flow += [Spacer(1, 6), simple_table(["", "Status", "Sev", "Item", "Plans say", "Recommendation", "Sheets"], rows,
+                                        [0.25, 0.75, 0.55, 1.6, 1.5, 1.95, 0.7])]
+    return flow + [PageBreak()]
+
+
+def build_report(project: dict, pages: list, images: dict, brand: dict, logo: bytes | None, qa: list, extras: dict | None = None) -> bytes:
+    extras = extras or {}
+    crew = extras.get("crew", "full")
     buf = io.BytesIO()
     company = brand.get("company_name") or "BuildSpec.ai"
     date = datetime.now(timezone.utc).strftime("%b %d, %Y")
@@ -158,7 +233,7 @@ def build_report(project: dict, pages: list, images: dict, brand: dict, logo: by
     doc.addPageTemplates([PageTemplate(frames=[Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height)], onPage=chrome)])
 
     contact = " · ".join(x for x in [brand.get("prepared_by"), brand.get("phone"), brand.get("email")] if x)
-    flow = [Spacer(1, 0.6 * inch), P("DIMENSION TAKEOFF REPORT", "h3"), P(project["name"], "h1"), Spacer(1, 8),
+    flow = [Spacer(1, 0.6 * inch), P(CREW_TITLES.get(crew, "DIMENSION TAKEOFF REPORT"), "h3"), P(project["name"], "h1"), Spacer(1, 8),
             P(f"Prepared by {company}" + (f" — {contact}" if contact else ""), "meta"),
             P(f"Issued {date} · {len(pages)} of {project.get('page_count', len(pages))} sheets in set", "meta")]
     if brand.get("client"):
@@ -173,6 +248,13 @@ def build_report(project: dict, pages: list, images: dict, brand: dict, logo: by
     t = grid(rows)
     t._argW = [w * inch for w in (0.8, 2.2, 1.0, 1.2, 0.6, 0.6, 0.9)]
     flow += [t, PageBreak()]
+
+    if extras.get("packet"):
+        flow += crew_section(extras["packet"])
+    if extras.get("icf"):
+        flow += icf_section(extras["icf"])
+    if extras.get("wp"):
+        flow += wp_section(extras["wp"])
 
     for pg in pages:
         flow += sheet_section(pg, images.get(pg["index"]))
