@@ -38,3 +38,6 @@ FastAPI (server.py, ai.py, storage.py) + MongoDB (projects, messages) + React (W
 - Job-site photos: upload/take photo + note → AI compares with plans: issues, step-by-step fixes, next steps, inspections, safety; follow-up Q&A per photo
 ## Backlog
 - Door/window cutouts in 3D, split server.py into routers, photo timeline in reports
+
+## Iteration 6 (2026-06)
+- Drain tile overlay (Drainage tab): AI traces foundation outline on chosen sheet and lays out drain tile route, cleanouts, sump/outlet, discharge and slope arrows (normalized coords); interactive SVG layers + animated flow; server-rendered PNG for crews (legend placed away from sump); included in full/foundation/waterproofing PDFs

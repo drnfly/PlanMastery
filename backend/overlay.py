@@ -19,6 +19,8 @@ def _pts(seq, w, h):
 
 
 def _arrow(d, a, b, color, width):
+    if math.dist(a, b) < 1:
+        return
     d.line([a, b], fill=color, width=width)
     ang = math.atan2(b[1] - a[1], b[0] - a[0])
     s = width * 4
@@ -30,6 +32,8 @@ def _arrow(d, a, b, color, width):
 def _dashed(d, pts, color, width, dash):
     for a, b in zip(pts, pts[1:]):
         length = math.dist(a, b)
+        if length < 1:
+            continue
         n = max(int(length // (dash * 2)), 1)
         for i in range(n):
             t0, t1 = (2 * i) * dash / length, min((2 * i + 1) * dash / length, 1)
@@ -76,18 +80,25 @@ def render_overlay(image: bytes, ov: dict) -> bytes:
         d.ellipse([x - r, y - r, x + r, y + r], fill=CLEANOUT + (240,), outline=(255, 255, 255, 255), width=2)
         d.text((x + r + 4, y - r), c.get("label") or "CO", fill=CLEANOUT + (255,), font=font, stroke_width=3, stroke_fill=(255, 255, 255, 255))
     sump = ov.get("sump") or {}
-    if sump.get("x") is not None:
+    if sump.get("x") is not None and (sump.get("x") or sump.get("y")):
         x, y = _pt((sump["x"], sump["y"]), w, h)
         r = lw * 4
         d.rectangle([x - r, y - r, x + r, y + r], fill=SUMP + (240,), outline=(255, 255, 255, 255), width=2)
         d.text((x + r + 4, y - r), sump.get("label") or "SUMP", fill=SUMP + (255,), font=font, stroke_width=3, stroke_fill=(255, 255, 255, 255))
 
-    items = [(TILE, f"Drain tile — {ov.get('pipe_spec') or 'perforated pipe'}" + (f" ({ov['length_ft']} LF)" if ov.get("length_ft") else "")),
+    items = [(TILE, f"Drain tile - {ov.get('pipe_spec') or 'perforated pipe'}" + (f" ({ov['length_ft']} LF)" if ov.get("length_ft") else "")),
              (DISCHARGE, "Discharge / solid outlet"), (CLEANOUT, "Cleanout"), (SUMP, "Sump / low point"), (SLOPE, "Slope direction")]
     pad, row = lw * 3, int(font.size * 1.6)
     box_w = int(max(d.textlength(t, font=font) for _, t in items) + pad * 4 + row)
     box_h = row * len(items) + pad * 2
-    x0, y0 = pad, h - box_h - pad
+    marks = dpts + ([_pt((sump["x"], sump["y"]), w, h)] if sump.get("x") is not None else [])
+    corners = [(pad, h - box_h - pad), (w - box_w - pad, h - box_h - pad), (pad, pad), (w - box_w - pad, pad)]
+
+    def clearance(c):
+        cx, cy = c[0] + box_w / 2, c[1] + box_h / 2
+        return min((math.dist((cx, cy), m) for m in marks), default=1e9)
+    x0, y0 = max(corners, key=clearance) if marks else corners[0]
+    x0, y0 = max(x0, 0), max(y0, 0)
     d.rectangle([x0, y0, x0 + box_w, y0 + box_h], fill=(255, 255, 255, 235), outline=(30, 41, 59, 255), width=2)
     for i, (col, t) in enumerate(items):
         yy = y0 + pad + i * row

@@ -424,8 +424,15 @@ async def report(pid: str, body: ReportIn):
     if body.crew in ("full", "foundation", "waterproofing") and (tools.get("drainage") or {}).get("status") == "ready":
         extras["drain"] = tools["drainage"]["data"]
         drawn = await db.pages.find({"project_id": pid, "drain_status": "ready"}, PAGE_LIST).sort("index", 1).to_list(20)
-        extras["drain_images"] = [(sheet_label(pg), await asyncio.to_thread(render_overlay, await fetch(pg["image_path"]), pg["drain_overlay"]),
-                                   pg["drain_overlay"].get("notes") or []) for pg in drawn if pg["drain_overlay"].get("is_foundation", True)]
+        extras["drain_images"] = []
+        for pg in drawn:
+            if pg["drain_overlay"].get("is_foundation") is False:
+                continue
+            try:
+                png = await asyncio.to_thread(render_overlay, await fetch(pg["image_path"]), pg["drain_overlay"])
+                extras["drain_images"].append((sheet_label(pg), png, pg["drain_overlay"].get("notes") or []))
+            except Exception:
+                logger.exception("drain overlay render failed")
     pdf = await asyncio.to_thread(build_report, p, pages, images, brand, logo, qa, extras)
     suffix = "takeoff_report" if body.crew == "full" else f"{body.crew}_crew_packet"
     fname = re.sub(r"[^A-Za-z0-9_-]+", "_", p["name"])[:60] + f"_{suffix}.pdf"
@@ -625,10 +632,11 @@ async def delete_photo(photo_id: str):
 
 @api.post("/projects/{pid}/pages/{idx}/drain-overlay")
 async def start_drain(pid: str, idx: int, background: BackgroundTasks):
-    pg = await get_page(pid, idx)
-    if pg.get("drain_status") == "generating":
+    await get_page(pid, idx)
+    res = await db.pages.update_one({"project_id": pid, "index": idx, "drain_status": {"$ne": "generating"}},
+                                    {"$set": {"drain_status": "generating", "drain_error": None}})
+    if not res.modified_count:
         raise HTTPException(409, "Already drawing")
-    await set_page(pid, idx, {"drain_status": "generating", "drain_error": None})
     background.add_task(run_drain, pid, idx)
     return {"drain_status": "generating"}
 
@@ -636,7 +644,7 @@ async def start_drain(pid: str, idx: int, background: BackgroundTasks):
 @api.get("/projects/{pid}/pages/{idx}/drain-overlay.png")
 async def drain_png(pid: str, idx: int):
     pg = await get_page(pid, idx)
-    if pg.get("drain_status") != "ready":
+    if pg.get("drain_status") != "ready" or pg["drain_overlay"].get("is_foundation") is False:
         raise HTTPException(404, "No drain tile layout for this sheet")
     png = await asyncio.to_thread(render_overlay, await fetch(pg["image_path"]), pg["drain_overlay"])
     return Response(content=png, media_type="image/png",

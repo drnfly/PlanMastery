@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 6: Drain Tile Overlay. Backend test_iter6_drain_overlay.py: 11 of 12 passed. The fast suite (9 tests) covers Smith S-201 schema, PNG attachment headers, 404 for a sheet with no layout or a bad page/project, the full and foundation-crew PDFs containing 'Drain tile layout — S-201', and the ICF crew PDF not containing it. The slow suite (3 tests, real Gemini) passed: a TEST_Iter4 S-201 draw went generating, then a second POST returned 409, then ready (about 14s) with a valid schema and PNG; the TEST cover returned is_foundation false; the waterproofing crew PDF has exactly one drain layout page, so the non-foundation cover is skipped. iter5 fast regression: 9/9 passed. One unit test failed: render_overlay raises ZeroDivisionError when a polyline has two identical consecutive points. Frontend, desktop on Smith: drain-sheet-select defaults to S-201 (index 2). The SVG has the same box as the sheet image (viewBox 1000x666.7 for a 3000x2000 image), and tile, sump, discharge and cleanouts 0-2 sit on the foundation outline. All 4 layer toggles hide and show their layers; Sump & discharge hides both. drain-download-button downloads drain_tile_S-201.png (142KB). Switching to A-101 shows 'Draw drain tile' with no SVG, toggles or download button. On TEST, drawing A-101 showed 'Drawing…' (disabled), then the overlay appeared about 15s later with no reload. The TEST cover shows drain-not-foundation and no SVG. Mobile 390px: no horizontal overflow and the overlay stays aligned, but the labels are too small to read. No page errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "overlay.py _dashed (GET drain-overlay.png and POST report)", "issue": "ZeroDivisionError when discharge.points has two identical consecutive points (length 0). This would return a 500 for the PNG, and the whole PDF report fails because render_overlay runs for every ready page. Fix: skip segments where length == 0. The same risk applies to _arrow with identical points (atan2 is OK there, but it draws nothing)."},
+      {"endpoint": "overlay.py legend", "issue": "The legend text 'Drain tile — 4\" PERF...' renders the em dash as a tofu box, because ImageFont.load_default lacks U+2014. Use '-' or load a TTF such as DejaVuSans."},
+      {"endpoint": "overlay.py legend placement", "issue": "The legend is always drawn bottom-left. On TEST_Iter4 S-201 the AI put the sump at bottom-left (162,832) with discharge down to y=932, and the legend box fully covers the sump and discharge in the crew PNG and the PDF. Place the legend in the corner farthest from the sump/discharge points, or below the image on extra canvas."},
+      {"endpoint": "GET drain-overlay.png for is_foundation=false", "issue": "This returns 200 and burns a legend plus the AI's placeholder sump {x:0,y:0,label:'N/A'} at the top-left corner of the cover sheet. Return 404/409 when is_foundation is false, or skip the sump when the arrays are empty."},
+      {"endpoint": "POST drain-overlay", "issue": "The 409 guard is a find-then-set, not atomic. Two concurrent POSTs can both start Gemini jobs. Use update_one with filter drain_status != 'generating' and check modified_count."},
+      {"endpoint": "set_tools.drain_overlay", "issue": "This always passes mime 'image/png' even when image_path is a .jpg, while run_drain keeps the original extension. It works with Gemini today, but it is inconsistent."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "DrainOverlay download button", "issue": "'PNG for crew' is shown on a non-foundation sheet (TEST cover, is_foundation false) and downloads a meaningless image. Hide it when ov.is_foundation === false.", "selector": "[data-testid=drain-download-button]", "priority": "LOW"},
+      {"component": "DrainOverlay download()", "issue": "No try/catch or toast on failure (a 404 or 500 throws silently). The object URL is never revoked.", "selector": "[data-testid=drain-download-button]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Drainage tab, mobile 390px", "issues": ["SVG labels (CO-1, 1/8\"/ft, SUMP / OUTLET, TO DAYLIGHT) use fixed fontSize 14-15 in a 1000-unit viewBox, which comes out at about 5px on a 356px-wide sheet and cannot be read. There is no zoom or full-screen option. Consider a tap-to-expand or pinch-zoom view, or scaling fonts up on small widths."]},
+      {"screen": "Drain overlay (AI quality)", "issues": ["The discharge line is often very short (about 100 units), so 'SUMP / OUTLET' and 'TO DAYLIGHT' overlap.", "On TEST S-201 the top-edge slope arrow points toward CO-1 (the high end) instead of toward the outlet, and the arrows are only 20 units long. Consider checking the arrow direction against the tile path order, or enforcing a minimum arrow length."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter6_drain_overlay.py", "/app/test_reports/pytest/iter6_fast.xml", "/app/test_reports/pytest/iter6_slow.xml"],
+  "action_items": [
+    "overlay._dashed: skip zero-length segments (length == 0) to avoid ZeroDivisionError, which causes a PNG 500 and makes the whole PDF report fail",
+    "overlay legend: replace the em dash with an ASCII dash or load a TTF font that has U+2014",
+    "overlay legend: avoid covering the sump/discharge (pick the free corner, or extend the canvas)",
+    "drain-overlay.png and UI: don't offer or render the PNG when is_foundation is false; ignore the placeholder sump at (0,0)",
+    "start_drain: atomic update for the 409 guard",
+    "DrainOverlay: wrap download in try/catch with a toast; make the overlay readable on mobile (expand/zoom or larger labels)"
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 827 lines (>700). Split the routers.",
+    "Report generation calls render_overlay for every ready drain page with no try/except, so one bad AI output breaks every report for the project.",
+    "The frontend Overlay hides the whole SVG only when is_foundation === false, so stray placeholder values are hidden in the UI but still burned into the PNG."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter6_drain_overlay.py"],
+  "success_rate": {"backend": "92% (11/12; 1 render robustness unit failure) + iter5 fast 9/9", "frontend": "~95% (all requested flows work; minor and design issues)"},
+  "seed_data_creation": "TEST_Iter4 Set (21f16323): drain overlays drawn on page 2 (S-201, is_foundation true), page 0 (cover, is_foundation false) and page 1 (A-101, drawn via the UI, is_foundation true). Smith was not modified (read-only, plus PDF/PNG generation).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend/tests && pytest test_iter6_drain_overlay.py -n 0 -m 'not slow' for the fast suite. Run with -m slow for real Gemini draws on TEST_Iter4 (about 40s total). The app is single-route '/'; select a project via project-item-{id} in the sidebar (use project-search-input). Gemini drain draws took about 14-15s, not 40-90s."
+}

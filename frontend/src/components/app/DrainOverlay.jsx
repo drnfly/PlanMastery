@@ -83,8 +83,12 @@ export const DrainOverlay = ({ project, onChange }) => {
     catch (e) { toast.error(e.response?.data?.detail || "Could not start"); }
   };
   const download = async () => {
-    const blob = await fetchDrainPng(project.id, page.index);
-    Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `drain_tile_${page.sheet_number || page.index + 1}.png` }).click();
+    try {
+      const blob = await fetchDrainPng(project.id, page.index);
+      const href = URL.createObjectURL(blob);
+      Object.assign(document.createElement("a"), { href, download: `drain_tile_${page.sheet_number || page.index + 1}.png` }).click();
+      setTimeout(() => URL.revokeObjectURL(href), 2000);
+    } catch { toast.error("Could not download the layout"); }
   };
   const legend = useMemo(() => [[C.tile, `Drain tile${ov?.length_ft ? ` · ${ov.length_ft} LF` : ""}`], [C.discharge, "Discharge"], [C.cleanout, "Cleanout"], [C.sump, "Sump / low point"], [C.slope, "Slope"]], [ov]);
 
@@ -96,7 +100,7 @@ export const DrainOverlay = ({ project, onChange }) => {
           className="bg-[#0B0F17] border border-slate-700 rounded-md px-2 py-1.5 text-xs max-w-[240px] focus:outline-none focus:ring-1 focus:ring-cyan-500">
           {project.pages.map((p) => <option key={p.index} value={p.index}>{p.sheet_number ? `${p.sheet_number} · ` : ""}{p.title}{p.drain_status === "ready" ? " ✓" : ""}</option>)}
         </select>
-        {status === "ready" && (
+        {status === "ready" && ov?.is_foundation !== false && (
           <button data-testid="drain-download-button" onClick={download} className="flex items-center gap-1.5 text-xs border border-slate-700 rounded-md px-3 py-1.5 hover:bg-slate-800 transition-colors"><Download className="h-3.5 w-3.5" />PNG for crew</button>
         )}
         <button data-testid="drain-draw-button" onClick={draw} disabled={status === "generating"}
@@ -116,11 +120,13 @@ export const DrainOverlay = ({ project, onChange }) => {
           </div>
         </div>
       )}
-      <div className="relative bg-white" data-testid="drain-overlay-stage">
+      <div className="overflow-x-auto bg-white" data-testid="drain-overlay-scroll">
+      <div className="relative bg-white min-w-[860px]" data-testid="drain-overlay-stage">
         {!url && <div className="h-80 flex items-center justify-center bg-[#0B0F17]"><Loader2 className="h-6 w-6 animate-spin text-cyan-400" /></div>}
         {url && <img src={url} alt="sheet" className="w-full h-auto block" data-testid="drain-sheet-image" />}
         {url && status === "ready" && ov?.is_foundation !== false && <Overlay ov={ov} aspect={aspect} on={on} />}
         {status === "generating" && <div className="scan-line" />}
+      </div>
       </div>
       <div className="px-4 py-3 space-y-1" data-testid="drain-overlay-info">
         {status === "none" && <p className="text-xs text-slate-400">Pick the foundation sheet and the AI will draw the drain tile route, cleanouts, sump and discharge on top of it.</p>}

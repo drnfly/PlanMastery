@@ -123,7 +123,8 @@ the image) around the full perimeter as a continuous path that starts at the HIG
 outlet; put the sump (or outlet) at the low point — use the location shown on the plans if any, else the corner nearest the lowest
 grade or street/daylight side; draw the solid discharge line from the sump/outlet away from the building (>= 10 ft) to daylight,
 storm or dry well; place cleanouts at the upstream (high) end, at corners where needed and at least every 100 ft; add 2-4 slope
-arrows along the tile pointing toward the outlet labeled with the slope (min 1/8" per ft unless plans say otherwise).
+arrows along the tile pointing toward the outlet (downhill, in the direction water flows) labeled with the slope (min 1/8" per ft unless
+plans say otherwise); each arrow should be at least 80 units long. The discharge line should be at least 120 units long.
 Return ONLY valid JSON (no markdown fences):
 {{
   "is_foundation": true,
@@ -141,4 +142,5 @@ If the sheet shows no foundation or floor plan outline, set "is_foundation": fal
 
 
 async def drain_overlay(image_path: str, sheet: str, context: str) -> dict:
-    return _parse(await _collect(EXPERT, DRAIN_OVERLAY_PROMPT.format(sheet=sheet, context=context), [(image_path, "image/png")]))
+    mime = "image/jpeg" if image_path.lower().endswith((".jpg", ".jpeg")) else "image/webp" if image_path.lower().endswith(".webp") else "image/png"
+    return _parse(await _collect(EXPERT, DRAIN_OVERLAY_PROMPT.format(sheet=sheet, context=context), [(image_path, mime)]))
