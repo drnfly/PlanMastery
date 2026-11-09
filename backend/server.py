@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
+from typing import Literal
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 import os
@@ -648,6 +649,17 @@ class Pt(BaseModel):
     label: str = ""
 
 
+SumpType = Literal["", "pit", "pump", "pit_pump", "ejector", "outlet"]
+
+
+class SumpPt(Pt):
+    type: SumpType = ""
+    pump_hp: str = Field("", max_length=20)
+    pit_size: str = Field("", max_length=40)
+    notes: str = Field("", max_length=300)
+    outlet: tuple[float, float] | None = None
+
+
 class Discharge(BaseModel):
     points: list[tuple[float, float]]
     to: str = ""
@@ -655,7 +667,8 @@ class Discharge(BaseModel):
 
 
 class DrainEdit(BaseModel):
-    sump: Pt | None = None
+    sump: SumpPt | None = None
+    sumps: list[SumpPt] | None = None
     cleanouts: list[Pt] | None = None
     discharge: Discharge | None = None
     reset: bool = False
@@ -669,15 +682,22 @@ async def edit_drain(pid: str, idx: int, body: DrainEdit):
     ov = pg["drain_overlay"]
     if ov.get("is_foundation") is False:
         raise HTTPException(400, "This sheet has no foundation layout")
-    original = ov.get("ai_original") or {k: ov.get(k) for k in ("sump", "cleanouts", "discharge")}
+    original = ov.get("ai_original") or {k: ov.get(k) for k in ("sump", "cleanouts", "discharge", "sumps")}
     if body.reset:
-        ov = {**ov, **original, "edited": False}
+        ov = {**ov, **original, "sumps": original.get("sumps") or [], "edited": False}
     else:
         c = lambda v: round(max(0.0, min(1000.0, v)), 1)  # noqa: E731
         merge = lambda old, p: {**(old or {}), "x": c(p.x), "y": c(p.y), **({"label": p.label} if p.label else {})}  # noqa: E731
+        finite = lambda pts: all(v == v and abs(v) != float("inf") for pt in pts for v in pt)  # noqa: E731
+        sump_fields = lambda s: {"type": s.type, "pump_hp": s.pump_hp.strip(), "pit_size": s.pit_size.strip(), "notes": s.notes.strip()}  # noqa: E731
         upd = {}
         if body.sump:
-            upd["sump"] = merge(ov.get("sump"), body.sump)
+            upd["sump"] = {**merge(ov.get("sump"), body.sump), **sump_fields(body.sump)}
+        if body.sumps is not None:
+            if not finite([s.outlet for s in body.sumps if s.outlet]):
+                raise HTTPException(400, "Invalid coordinates")
+            upd["sumps"] = [{**merge({}, s), **sump_fields(s), "outlet": [c(s.outlet[0]), c(s.outlet[1])] if s.outlet else None}
+                            for s in body.sumps]
         if body.cleanouts is not None:
             upd["cleanouts"] = [merge({}, p) for p in body.cleanouts]
         if body.discharge:

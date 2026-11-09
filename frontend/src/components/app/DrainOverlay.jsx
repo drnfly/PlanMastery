@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Download, PenLine, RefreshCw, Move, Plus, Trash2, Undo2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { fetchPageImage, startDrainOverlay, fetchDrainPng, editDrainOverlay } from "@/lib/api";
+import { SumpPanel, newSump } from "@/components/app/SumpPanel";
 
 const C = { tile: "#2563EB", discharge: "#16A34A", cleanout: "#EA580C", sump: "#DC2626", slope: "#C026D3", foot: "#06B6D4" };
 const LAYERS = [["tile", "Drain tile"], ["cleanouts", "Cleanouts"], ["sump", "Sump & discharge"], ["slope", "Slope arrows"]];
@@ -72,7 +73,7 @@ const Overlay = ({ ov, aspect, on, edit, sel, onDrag, onSelect }) => {
         <g data-testid="drain-sump" onPointerDown={grab({ kind: "sump" })} {...handle}>
           {edit && <circle cx={ov.sump.x} cy={sy(ov.sump.y)} r="28" fill={isSel("sump") ? `${C.sump}33` : "transparent"} stroke={isSel("sump") ? C.sump : "none"} strokeDasharray="4 3" />}
           <rect x={ov.sump.x - 13} y={sy(ov.sump.y) - 13} width="26" height="26" fill={C.sump} stroke="#fff" strokeWidth="2.5" />
-          <text x={ov.sump.x + 18} y={sy(ov.sump.y) + 24} fill={C.sump} fontSize="15" fontWeight="700" stroke="#fff" strokeWidth="3" paintOrder="stroke">{ov.sump.label || "SUMP"}</text>
+          <text x={ov.sump.x + 18} y={sy(ov.sump.y) + 24} fill={C.sump} fontSize="15" fontWeight="700" stroke="#fff" strokeWidth="3" paintOrder="stroke">{ov.sump.label || "SUMP"}{ov.sump.pump_hp ? ` · ${ov.sump.pump_hp} HP` : ""}</text>
         </g>
       )}
       {edit && on.sump && outlet && (
@@ -81,12 +82,33 @@ const Overlay = ({ ov, aspect, on, edit, sel, onDrag, onSelect }) => {
           <circle cx={outlet[0]} cy={sy(outlet[1])} r="9" fill={C.discharge} stroke="#fff" strokeWidth="2.5" />
         </g>
       )}
+      {on.sump && (ov.sumps || []).map((s, i) => (
+        <g key={`xs-${i}`}>
+          {s.outlet && (
+            <line x1={s.x} y1={sy(s.y)} x2={s.outlet[0]} y2={sy(s.outlet[1])} stroke={C.discharge} strokeWidth="5" strokeDasharray="12 8" markerEnd="url(#arrow-discharge)" data-testid={`drain-xsump-discharge-${i}`} />
+          )}
+          <g data-testid={`drain-xsump-${i}`} onPointerDown={grab({ kind: "xsump", i })} {...handle}>
+            {edit && <circle cx={s.x} cy={sy(s.y)} r="28" fill={isSel("xsump", i) ? `${C.sump}33` : "transparent"} stroke={isSel("xsump", i) ? C.sump : "none"} strokeDasharray="4 3" />}
+            <rect x={s.x - 13} y={sy(s.y) - 13} width="26" height="26" fill={C.sump} stroke="#fff" strokeWidth="2.5" />
+            {["pump", "pit_pump", "ejector"].includes(s.type) && <circle cx={s.x} cy={sy(s.y)} r="6" fill="#fff" />}
+            <text x={s.x + 18} y={sy(s.y) + 24} fill={C.sump} fontSize="15" fontWeight="700" stroke="#fff" strokeWidth="3" paintOrder="stroke">{s.label || "SUMP"}{s.pump_hp ? ` · ${s.pump_hp} HP` : ""}</text>
+          </g>
+          {edit && s.outlet && (
+            <g data-testid={`drain-xoutlet-${i}`} onPointerDown={grab({ kind: "xoutlet", i })} {...handle}>
+              <circle cx={s.outlet[0]} cy={sy(s.outlet[1])} r="22" fill={isSel("xoutlet", i) ? `${C.discharge}44` : "transparent"} stroke={C.discharge} strokeDasharray="4 3" strokeWidth="2" />
+              <circle cx={s.outlet[0]} cy={sy(s.outlet[1])} r="8" fill={C.discharge} stroke="#fff" strokeWidth="2.5" />
+            </g>
+          )}
+        </g>
+      ))}
     </svg>
   );
 };
 
 const applyDrag = (ov, target, x, y) => {
   if (target.kind === "cleanout") return { ...ov, cleanouts: ov.cleanouts.map((c, i) => (i === target.i ? { ...c, x, y } : c)) };
+  if (target.kind === "xsump") return { ...ov, sumps: ov.sumps.map((s, i) => (i === target.i ? { ...s, x, y } : s)) };
+  if (target.kind === "xoutlet") return { ...ov, sumps: ov.sumps.map((s, i) => (i === target.i ? { ...s, outlet: [x, y] } : s)) };
   const pts0 = ov.discharge?.points || [];
   if (target.kind === "outlet") return { ...ov, discharge: { ...ov.discharge, points: [...pts0.slice(0, -1), [x, y]] } };
   return { ...ov, sump: { ...ov.sump, x, y }, discharge: pts0.length > 1 ? { ...ov.discharge, points: [[x, y], ...pts0.slice(1)] } : ov.discharge };
@@ -102,10 +124,12 @@ const EditBar = ({ draft, sel, setDraft, setSel, save, cancel, reset, saving, ed
     setSel({ kind: "cleanout", i: n });
   };
   const remove = () => { setDraft({ ...draft, cleanouts: draft.cleanouts.filter((_, i) => i !== sel.i) }); setSel(null); };
+  const addSump = () => { setDraft({ ...draft, sumps: [...(draft.sumps || []), newSump(draft)] }); setSel({ kind: "xsump", i: (draft.sumps || []).length }); };
   const btn = "text-xs rounded-md border px-3 py-1.5 transition-colors disabled:opacity-40";
   return (
     <div className="px-4 py-2 flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/5" data-testid="drain-edit-bar">
-      <p className="text-[11px] text-amber-300 mr-auto flex items-center gap-1.5"><Move className="h-3.5 w-3.5" />Drag the sump, cleanouts or the green outlet to where they really are on site.</p>
+      <p className="text-[11px] text-amber-300 mr-auto flex items-center gap-1.5"><Move className="h-3.5 w-3.5" />Drag sumps, pumps, cleanouts or the green outlets to where they really are on site.</p>
+      <button data-testid="drain-add-sump" onClick={addSump} className={`${btn} border-red-500/60 text-red-300 hover:bg-red-500/10 flex items-center gap-1`}><Plus className="h-3.5 w-3.5" />Sump / pump</button>
       <button data-testid="drain-add-cleanout" onClick={add} className={`${btn} border-slate-700 hover:bg-slate-800 flex items-center gap-1`}><Plus className="h-3.5 w-3.5" />Cleanout</button>
       <button data-testid="drain-remove-cleanout" onClick={remove} disabled={sel?.kind !== "cleanout"} className={`${btn} border-slate-700 hover:bg-slate-800 flex items-center gap-1`}><Trash2 className="h-3.5 w-3.5" />Remove</button>
       {edited && <button data-testid="drain-reset-ai" onClick={reset} disabled={saving} className={`${btn} border-slate-700 hover:bg-slate-800 flex items-center gap-1`}><Undo2 className="h-3.5 w-3.5" />AI layout</button>}
@@ -137,14 +161,21 @@ export const DrainOverlay = ({ project, onChange }) => {
   useEffect(() => { setDraft(null); setSel(null); setKept(null); }, [page.index]);
   useEffect(() => { setKept(null); }, [page.drain_overlay]);
 
-  const startEdit = () => { setOn({ ...on, cleanouts: true, sump: true }); setDraft(JSON.parse(JSON.stringify(saved))); };
+  const startEdit = (withSump = false) => {
+    setOn({ ...on, cleanouts: true, sump: true });
+    const d = JSON.parse(JSON.stringify(saved));
+    if (withSump) { d.sumps = [...(d.sumps || []), newSump(d)]; setSel({ kind: "xsump", i: d.sumps.length - 1 }); }
+    setDraft(d);
+  };
   const persist = async (body, msg) => {
     setSaving(true);
     try { setKept(await editDrainOverlay(project.id, page.index, body)); toast.success(msg, { position: "top-center" }); setDraft(null); setSel(null); onChange(); }
-    catch (e) { toast.error(e.response?.data?.detail || "Could not save layout"); }
+    catch (e) { const d = e.response?.data?.detail; toast.error(typeof d === "string" ? d : "Could not save layout"); }
     finally { setSaving(false); }
   };
-  const save = () => persist({ sump: draft.sump, cleanouts: draft.cleanouts || [], discharge: draft.discharge }, "Layout saved — PNG and reports now use the field positions");
+  const clean = (s) => ({ x: s.x, y: s.y, label: s.label || "", type: s.type || "", pump_hp: s.pump_hp || "", pit_size: s.pit_size || "", notes: s.notes || "", outlet: s.outlet || null });
+  const save = () => persist({ sump: draft.sump ? clean(draft.sump) : null, sumps: (draft.sumps || []).map(clean), cleanouts: draft.cleanouts || [], discharge: draft.discharge },
+    "Layout saved — PNG and reports now use the field positions");
   const reset = () => persist({ reset: true }, "Restored the AI layout");
 
   useEffect(() => {
@@ -185,7 +216,10 @@ export const DrainOverlay = ({ project, onChange }) => {
         </select>
         {status === "ready" && saved?.edited && <span className="font-mono text-[10px] text-amber-300 border border-amber-500/40 rounded px-1.5 py-0.5" data-testid="drain-edited-badge">FIELD-ADJUSTED</span>}
         {status === "ready" && ov?.is_foundation !== false && !editing && (
-          <button data-testid="drain-adjust-button" onClick={startEdit} className="flex items-center gap-1.5 text-xs border border-amber-500/60 text-amber-300 rounded-md px-3 py-1.5 hover:bg-amber-500/10 transition-colors"><Move className="h-3.5 w-3.5" />Adjust on site</button>
+          <button data-testid="drain-add-sump-header" onClick={() => startEdit(true)} className="flex items-center gap-1.5 text-xs border border-red-500/60 text-red-300 rounded-md px-3 py-1.5 hover:bg-red-500/10 transition-colors"><Plus className="h-3.5 w-3.5" />Add sump / pump</button>
+        )}
+        {status === "ready" && ov?.is_foundation !== false && !editing && (
+          <button data-testid="drain-adjust-button" onClick={() => startEdit()} className="flex items-center gap-1.5 text-xs border border-amber-500/60 text-amber-300 rounded-md px-3 py-1.5 hover:bg-amber-500/10 transition-colors"><Move className="h-3.5 w-3.5" />Adjust on site</button>
         )}
         {status === "ready" && ov?.is_foundation !== false && !editing && (
           <button data-testid="drain-download-button" onClick={download} className="flex items-center gap-1.5 text-xs border border-slate-700 rounded-md px-3 py-1.5 hover:bg-slate-800 transition-colors"><Download className="h-3.5 w-3.5" />PNG for crew</button>
@@ -208,6 +242,9 @@ export const DrainOverlay = ({ project, onChange }) => {
         </div>
       )}
       {editing && <EditBar draft={draft} sel={sel} setDraft={setDraft} setSel={setSel} save={save} cancel={() => { setDraft(null); setSel(null); }} reset={reset} saving={saving} edited={saved?.edited} />}
+      {status === "ready" && ov && ov.is_foundation !== false && (editing || ov.sumps?.length > 0 || ov.sump?.type) && (
+        <SumpPanel draft={ov} setDraft={setDraft} sel={sel} setSel={setSel} editing={editing} />
+      )}
       <div className="overflow-x-auto bg-white" data-testid="drain-overlay-scroll">
       <div className="relative bg-white min-w-[860px]" data-testid="drain-overlay-stage">
         {!url && <div className="h-80 flex items-center justify-center bg-[#0B0F17]"><Loader2 className="h-6 w-6 animate-spin text-cyan-400" /></div>}

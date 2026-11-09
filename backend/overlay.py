@@ -42,6 +42,20 @@ def _dashed(d, pts, color, width, dash):
             d.line([(a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0), (a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1)], fill=color, width=width)
 
 
+SUMP_TYPES = {"pit": "SUMP PIT", "pump": "SUMP PUMP", "pit_pump": "PIT + PUMP", "ejector": "EJECTOR PUMP", "outlet": "OUTLET"}
+
+
+def sump_text(s: dict, default: str) -> str:
+    bits = [s.get("label") or default]
+    if s.get("type") in SUMP_TYPES and SUMP_TYPES[s["type"]] not in bits[0].upper():
+        bits.append(SUMP_TYPES[s["type"]])
+    if s.get("pump_hp"):
+        bits.append(f"{s['pump_hp']} HP")
+    if s.get("pit_size"):
+        bits.append(f"pit {s['pit_size']}")
+    return " · ".join(bits).replace(" · ", " - ")
+
+
 def render_overlay(image: bytes, ov: dict) -> bytes:
     img = Image.open(io.BytesIO(image)).convert("RGB")
     w, h = img.size
@@ -84,14 +98,32 @@ def render_overlay(image: bytes, ov: dict) -> bytes:
         x, y = _pt((sump["x"], sump["y"]), w, h)
         r = lw * 4
         d.rectangle([x - r, y - r, x + r, y + r], fill=SUMP + (240,), outline=(255, 255, 255, 255), width=2)
-        d.text((x + r + 4, y - r), sump.get("label") or "SUMP", fill=SUMP + (255,), font=font, stroke_width=3, stroke_fill=(255, 255, 255, 255))
+        d.text((x + r + 4, y - r), sump_text(sump, "SUMP"), fill=SUMP + (255,), font=font, stroke_width=3, stroke_fill=(255, 255, 255, 255))
+    extra_marks = []
+    for s in ov.get("sumps") or []:
+        try:
+            x, y = _pt((s["x"], s["y"]), w, h)
+        except (KeyError, TypeError, ValueError):
+            continue
+        out = s.get("outlet")
+        if out and len(out) == 2:
+            o = _pt(out, w, h)
+            _dashed(d, [(x, y), o], DISCHARGE + (240,), lw * 2, lw * 4)
+            _arrow(d, (x, y), o, DISCHARGE + (240,), lw * 2)
+            extra_marks.append(o)
+        r = lw * 4
+        d.rectangle([x - r, y - r, x + r, y + r], fill=SUMP + (240,), outline=(255, 255, 255, 255), width=2)
+        if s.get("type") in ("pump", "pit_pump", "ejector"):
+            d.ellipse([x - r * 0.45, y - r * 0.45, x + r * 0.45, y + r * 0.45], fill=(255, 255, 255, 255))
+        d.text((x + r + 4, y - r), sump_text(s, "SUMP"), fill=SUMP + (255,), font=font, stroke_width=3, stroke_fill=(255, 255, 255, 255))
+        extra_marks.append((x, y))
 
     items = [(TILE, f"Drain tile - {ov.get('pipe_spec') or 'perforated pipe'}" + (f" ({ov['length_ft']} LF)" if ov.get("length_ft") else "")),
              (DISCHARGE, "Discharge / solid outlet"), (CLEANOUT, "Cleanout"), (SUMP, "Sump / low point"), (SLOPE, "Slope direction")]
     pad, row = lw * 3, int(font.size * 1.6)
     box_w = int(max(d.textlength(t, font=font) for _, t in items) + pad * 4 + row)
     box_h = row * len(items) + pad * 2
-    marks = dpts + ([_pt((sump["x"], sump["y"]), w, h)] if sump.get("x") is not None else [])
+    marks = dpts + extra_marks + ([_pt((sump["x"], sump["y"]), w, h)] if sump.get("x") is not None else [])
     corners = [(pad, h - box_h - pad), (w - box_w - pad, h - box_h - pad), (pad, pad), (w - box_w - pad, pad)]
 
     def clearance(c):
