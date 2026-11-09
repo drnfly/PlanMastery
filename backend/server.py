@@ -23,6 +23,8 @@ from PIL import Image, ImageOps  # noqa: E402
 from storage import init_storage, get_object, put_object, APP_NAME  # noqa: E402
 from processing import open_pdf, process_pdf_page, process_image  # noqa: E402
 from ai_engine import index_sheets, analyze_sheet, model_sheet, stream_chat, temp_file, pick_sheets  # noqa: E402
+from overlay import render_overlay  # noqa: E402
+from set_tools import drain_overlay  # noqa: E402
 from report import build_report  # noqa: E402
 from icf_calc import compute as icf_compute  # noqa: E402
 from set_tools import ICF_PROMPT, WP_PROMPT, DRAIN_PROMPT, CREWS, set_json, crew_prompt, analyze_photo, photo_followup  # noqa: E402
@@ -200,6 +202,22 @@ async def run_analysis(pid: str, idx: int):
     except Exception as e:
         logger.exception("analysis failed")
         await set_page(pid, idx, {"status": "failed", "error": str(e)[:300]})
+
+
+async def run_drain(pid: str, idx: int):
+    pg = await get_page(pid, idx)
+    try:
+        p = await db.projects.find_one({"id": pid}, NO_ID)
+        dr = ((p.get("tools") or {}).get("drainage") or {}).get("data") or {}
+        ctx = json.dumps({"strategy": dr.get("strategy"), "items": [{k: i.get(k) for k in ("item", "status", "spec", "quantity", "recommendation")}
+                                                                     for i in dr.get("items", [])]})[:12000] if dr else "(no drainage plan yet)"
+        data = await fetch(pg["image_path"])
+        with temp_file(data, pg["image_path"].rsplit(".", 1)[-1]) as path:
+            result = await drain_overlay(path, sheet_label(pg), ctx)
+        await set_page(pid, idx, {"drain_status": "ready", "drain_overlay": result, "drain_error": None})
+    except Exception as e:
+        logger.exception("drain overlay failed")
+        await set_page(pid, idx, {"drain_status": "failed", "drain_error": str(e)[:300]})
 
 
 async def run_model3d(pid: str, idx: int):
@@ -405,6 +423,9 @@ async def report(pid: str, body: ReportIn):
         extras["wp"] = tools["waterproofing"]["data"]
     if body.crew in ("full", "foundation", "waterproofing") and (tools.get("drainage") or {}).get("status") == "ready":
         extras["drain"] = tools["drainage"]["data"]
+        drawn = await db.pages.find({"project_id": pid, "drain_status": "ready"}, PAGE_LIST).sort("index", 1).to_list(20)
+        extras["drain_images"] = [(sheet_label(pg), await asyncio.to_thread(render_overlay, await fetch(pg["image_path"]), pg["drain_overlay"]),
+                                   pg["drain_overlay"].get("notes") or []) for pg in drawn if pg["drain_overlay"].get("is_foundation", True)]
     pdf = await asyncio.to_thread(build_report, p, pages, images, brand, logo, qa, extras)
     suffix = "takeoff_report" if body.crew == "full" else f"{body.crew}_crew_packet"
     fname = re.sub(r"[^A-Za-z0-9_-]+", "_", p["name"])[:60] + f"_{suffix}.pdf"
@@ -602,6 +623,26 @@ async def delete_photo(photo_id: str):
     return {"ok": True}
 
 
+@api.post("/projects/{pid}/pages/{idx}/drain-overlay")
+async def start_drain(pid: str, idx: int, background: BackgroundTasks):
+    pg = await get_page(pid, idx)
+    if pg.get("drain_status") == "generating":
+        raise HTTPException(409, "Already drawing")
+    await set_page(pid, idx, {"drain_status": "generating", "drain_error": None})
+    background.add_task(run_drain, pid, idx)
+    return {"drain_status": "generating"}
+
+
+@api.get("/projects/{pid}/pages/{idx}/drain-overlay.png")
+async def drain_png(pid: str, idx: int):
+    pg = await get_page(pid, idx)
+    if pg.get("drain_status") != "ready":
+        raise HTTPException(404, "No drain tile layout for this sheet")
+    png = await asyncio.to_thread(render_overlay, await fetch(pg["image_path"]), pg["drain_overlay"])
+    return Response(content=png, media_type="image/png",
+                    headers={"Content-Disposition": f'attachment; filename="drain_tile_{re.sub(r"[^A-Za-z0-9_-]+", "_", sheet_label(pg))}.png"'})
+
+
 @api.post("/projects/{pid}/pages/{idx}/model3d")
 async def model_page(pid: str, idx: int, background: BackgroundTasks):
     await get_page(pid, idx, PAGE_LIST)
@@ -731,6 +772,7 @@ async def migrate_legacy():
     await cleanup_uploads()
     await db.pages.update_many({"status": "analyzing"}, {"$set": {"status": "pending"}})
     await db.pages.update_many({"model3d_status": "generating"}, {"$set": {"model3d_status": "none"}})
+    await db.pages.update_many({"drain_status": "generating"}, {"$set": {"drain_status": "failed", "drain_error": "Interrupted — draw again"}})
     for tool in TOOLS:
         await db.projects.update_many({f"tools.{tool}.status": "running"},
                                       {"$set": {f"tools.{tool}.status": "failed", f"tools.{tool}.error": "Interrupted — run again"}})

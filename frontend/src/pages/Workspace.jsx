@@ -16,7 +16,7 @@ import { PhotosPanel } from "@/components/app/PhotosPanel";
 
 const TABS = [["sheets", "Sheets", Layers], ["icf", "ICF estimator", Boxes], ["waterproofing", "Waterproofing", Droplets], ["drainage", "Drainage", Waves], ["photos", "Job photos", Camera]];
 
-const busy = (p, i) => p.status === "processing" || p.pages?.some((pg) => pg.status === "analyzing" || pg.model3d_status === "generating")
+const busy = (p, i) => p.status === "processing" || p.pages?.some((pg) => pg.status === "analyzing" || pg.model3d_status === "generating" || pg.drain_status === "generating")
   || p.pages?.[i]?.status === "pending" || Object.values(p.tools || {}).some((t) => t.status === "running");
 
 export default function Workspace() {

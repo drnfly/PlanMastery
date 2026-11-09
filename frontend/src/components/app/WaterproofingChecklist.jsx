@@ -3,6 +3,7 @@ import { Droplets, Waves } from "lucide-react";
 import { toast } from "sonner";
 import { patchWp } from "@/lib/api";
 import { ToolGate } from "@/components/app/ToolGate";
+import { DrainOverlay } from "@/components/app/DrainOverlay";
 
 const STATUS = {
   missing: "text-red-300 border-red-500/40 bg-red-500/10",
@@ -87,6 +88,7 @@ export const DrainagePlan = ({ project, onChange }) => (
           </div>
         )}
         <WpBody project={project} data={data} onChange={onChange} tool="drainage" />
+        <DrainOverlay project={project} onChange={onChange} />
         <div className="grid md:grid-cols-3 gap-4">
           <Steps id="drainage-sequence" title="Installation sequence" items={data.sequence} />
           <Steps id="drainage-inspections" title="Hold points & inspections" items={data.inspections} mark="✓" />

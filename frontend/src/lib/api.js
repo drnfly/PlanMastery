@@ -30,6 +30,9 @@ export const fetchPhoto = (pid) => axios.get(`${API}/photos/${pid}/image`, { res
 export const askPhoto = (pid, question) => axios.post(`${API}/photos/${pid}/ask`, { question });
 export const reanalyzePhoto = (pid) => axios.post(`${API}/photos/${pid}/reanalyze`);
 export const deletePhoto = (pid) => axios.delete(`${API}/photos/${pid}`);
+export const startDrainOverlay = (id, idx) => axios.post(`${API}/projects/${id}/pages/${idx}/drain-overlay`);
+export const fetchDrainPng = (id, idx) =>
+  axios.get(`${API}/projects/${id}/pages/${idx}/drain-overlay.png`, { responseType: "blob" }).then((r) => r.data);
 
 const CHUNK = 4 * 1024 * 1024;
 

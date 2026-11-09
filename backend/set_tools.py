@@ -111,3 +111,34 @@ async def photo_followup(analysis: dict, question: str, context: str, files: lis
 
 def crew_prompt(crew: str) -> str:
     return CREW_PROMPT.format(crew=CREWS[crew])
+
+
+DRAIN_OVERLAY_PROMPT = """The attached image is construction sheet {sheet}. Lay out the FOUNDATION DRAIN TILE system on top of it so a crew
+can see the route. Coordinates are normalized 0-1000 relative to the FULL image: x from the left edge, y from the top edge.
+Project drainage plan context (from the whole plan set):
+{context}
+
+Rules: trace the outer edge of the foundation/footing; route the perforated drain tile just OUTSIDE the footing (offset ~1-2% of
+the image) around the full perimeter as a continuous path that starts at the HIGH point and runs both ways to the LOW point /
+outlet; put the sump (or outlet) at the low point — use the location shown on the plans if any, else the corner nearest the lowest
+grade or street/daylight side; draw the solid discharge line from the sump/outlet away from the building (>= 10 ft) to daylight,
+storm or dry well; place cleanouts at the upstream (high) end, at corners where needed and at least every 100 ft; add 2-4 slope
+arrows along the tile pointing toward the outlet labeled with the slope (min 1/8" per ft unless plans say otherwise).
+Return ONLY valid JSON (no markdown fences):
+{{
+  "is_foundation": true,
+  "footprint": [[x, y], ...],
+  "drain_tile": [[x, y], ...],
+  "sump": {{"x": 0, "y": 0, "label": "SUMP / OUTLET"}},
+  "discharge": {{"points": [[x, y], ...], "to": "daylight | storm | dry well", "label": "TO DAYLIGHT"}},
+  "cleanouts": [{{"x": 0, "y": 0, "label": "CO-1"}}],
+  "slope_arrows": [{{"x1": 0, "y1": 0, "x2": 0, "y2": 0, "label": "1/8\\"/ft"}}],
+  "pipe_spec": "e.g. 4\\" perforated PVC in 12\\" washed stone wrapped in filter fabric",
+  "length_ft": 0,
+  "notes": ["short crew notes about this layout, incl. what was assumed because the plans don't show it"]
+}}
+If the sheet shows no foundation or floor plan outline, set "is_foundation": false and leave the arrays empty."""
+
+
+async def drain_overlay(image_path: str, sheet: str, context: str) -> dict:
+    return _parse(await _collect(EXPERT, DRAIN_OVERLAY_PROMPT.format(sheet=sheet, context=context), [(image_path, "image/png")]))

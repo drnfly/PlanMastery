@@ -88,3 +88,6 @@ body {
         border-left-color: inherit; border-right-color: inherit; border-top-color: inherit; border-bottom-color: inherit;
     }
 }
+
+.drain-flow { stroke-dasharray: 18 10; animation: drain-flow 1.6s linear infinite; }
+@keyframes drain-flow { to { stroke-dashoffset: -56; } }

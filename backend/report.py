@@ -74,14 +74,14 @@ def dim_table(kind: str, items: list) -> Table:
     return t
 
 
-def sheet_image(data: bytes):
+def sheet_image(data: bytes, max_h_in: float = 4.6):
     img = PILImage.open(io.BytesIO(data)).convert("RGB")
-    img.thumbnail((1600, 1600))
+    img.thumbnail((2200, 2200))
     buf = io.BytesIO()
-    img.save(buf, "JPEG", quality=72)
+    img.save(buf, "JPEG", quality=78)
     buf.seek(0)
     w, h = img.size
-    max_w, max_h = 7.3 * inch, 4.6 * inch
+    max_w, max_h = 7.3 * inch, max_h_in * inch
     r = min(max_w / w, max_h / h)
     im = Image(buf, width=w * r, height=h * r)
     im.hAlign = "LEFT"
@@ -263,6 +263,8 @@ def build_report(project: dict, pages: list, images: dict, brand: dict, logo: by
         flow += wp_section(extras["wp"])
     if extras.get("drain"):
         flow += wp_section(extras["drain"], "Drainage plan")
+    for label, png, notes in extras.get("drain_images") or []:
+        flow += [P(f"Drain tile layout — {label}", "h2"), sheet_image(png, 8.0)] + bullets(notes) + [PageBreak()]
 
     for pg in pages:
         flow += sheet_section(pg, images.get(pg["index"]))
