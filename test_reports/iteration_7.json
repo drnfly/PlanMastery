@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 7: Drag To Adjust drain layout. Backend: the new file test_iter7_drain_edit.py passed 13 of 13, and the iter6 fast regression passed 9 of 9. Coverage: PUT clamps values to 0-1000 (-50→0, 1500→1000, 1200→1000), sets edited=true and edited_at, and persists the edit. ai_original keeps the first AI positions across 2 edits. reset restores the AI sump, cleanouts and discharge with edited=false. Six bad-coordinate bodies return 400 and leave the data unchanged. A sheet that isn't ready returns 400 ('Draw the drain tile layout first'), and an unknown page or project returns 404. A pixel check shows the moved sump and cleanout in drain-overlay.png and in the foundation crew PDF image, and after reset the PNG is back at the AI positions. Frontend, desktop 1920 on TEST_Iter4 S-201: all requested flows work. Dragging before Adjust does nothing. Adjust shows the edit bar, hides adjust and download, disables the select and Redraw, and shows the outlet handle. Remove is disabled until a cleanout is selected, and AI layout is hidden when the layout isn't edited. The discharge start follows a dragged sump. Dragging the outlet moves the discharge end. Cancel discards the drag both on screen and on the server. Add makes CO-4 at (500,500) and selects it, and Remove deletes it. Save shows the toast and the FIELD-ADJUSTED badge, and the positions survive a reload. The downloaded drain_tile_S-201.png (3000x2000) shows the new sump and cleanouts. AI layout restores the layout and clears the badge. Mobile 390: no page overflow, the stage is 860px wide, and a real CDP touch drag moves the sump without scrolling the page; the save persisted. One UX issue: while editing, a swipe on the sheet cannot scroll the stage sideways. No page errors. Smith was never edited and is still edited=false; TEST S-201 was reset to the AI layout.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/projects/{id}/pages/{idx}/drain-overlay", "issue": "Partial body wipes data: cleanouts defaults to [], so a body with only {sump:{...}} deletes every cleanout. A sump sent without a label also loses its label. Only send fields that are present, or make cleanouts Optional[None]."},
+      {"endpoint": "PUT /api/projects/{id}/pages/{idx}/drain-overlay", "issue": "Loose validation: NaN or Infinity is silently clamped to 1000, true becomes 1, and the string '12' is accepted. Use a Pydantic model, e.g. Point(x: confloat(allow_inf_nan=False)). Edits are also accepted on is_foundation=false sheets (sump 0,0); could return 400."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "DrainOverlay Overlay svg (mobile)", "issue": "In edit mode the whole SVG has touch-action:none, so a swipe on the sheet can't scroll the 860px stage sideways (scrollLeft stayed 0; in view mode the same swipe scrolled 135px). It also blocks vertical page scrolling over the sheet. On a 390px phone the crew can't reach CO-2/CO-3 on the right half while editing: Cancel throws the edit away, and Save is the only other way out of edit mode. Put touch-action:none only on the handles (already done) and remove it from the svg root. Or use pointer capture only after pointerdown on a handle.", "selector": "[data-testid=drain-overlay-svg]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Drainage tab, desktop", "issues": ["The save toast (bottom-right) covers the Plan expert chat send button for its duration.", "Saved coordinates carry float noise (420.0000305). Round to 1 decimal before saving."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter7_drain_edit.py", "/app/test_reports/pytest/iter7_drain_edit.xml"],
+  "action_items": [
+    "Mobile: remove touch-action:none from the drain-overlay-svg root (keep it on the handles) so the stage can still be panned while editing.",
+    "PUT drain-overlay: don't overwrite cleanouts or labels when a field is missing from the body; validate coordinates as finite numbers.",
+    "Optional: round coordinates; reject edits on is_foundation=false sheets."
+  ],
+  "critical_code_review_comments": [
+    "edit_drain: the DrainEdit dict fields are untyped. Typed Point/Discharge models would give 422s and drop the try/except.",
+    "DrainOverlay.persist calls setDraft(null) before onChange() refetches, so the old positions can flash for a moment before the new ones show.",
+    "EditBar add(): the label CO-{n+1} can repeat an existing label after a removal (e.g., removing CO-2 and then adding gives a second CO-3)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter7_drain_edit.py"],
+  "success_rate": {"backend": "100% (13/13 + 9/9 regression)", "frontend": "95% (all flows pass; mobile pan-while-editing issue)"},
+  "seed_data_creation": "None. TEST_Iter4 S-201 was edited and then reset (edited=false). A reset call on TEST page 0 (the cover) added edited=false. Smith was not modified.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend/tests && pytest test_iter7_drain_edit.py -n 0 -p no:randomly (the tests are ordered; the module fixture resets at the end). The near() helper checks overlay colors at 0-1000 coordinates in the PNG or PDF image. For UI drags, map SVG coordinates to screen with getScreenCTM (y * viewBox.height/1000). Mobile touch works through CDP Emulation.setTouchEmulationEnabled + Input.dispatchTouchEvent."
+}

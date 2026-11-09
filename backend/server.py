@@ -1,9 +1,10 @@
 from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request, UploadFile, File, Form
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 import os
@@ -641,10 +642,22 @@ async def start_drain(pid: str, idx: int, background: BackgroundTasks):
     return {"drain_status": "generating"}
 
 
+class Pt(BaseModel):
+    x: float = Field(allow_inf_nan=False)
+    y: float = Field(allow_inf_nan=False)
+    label: str = ""
+
+
+class Discharge(BaseModel):
+    points: list[tuple[float, float]]
+    to: str = ""
+    label: str = ""
+
+
 class DrainEdit(BaseModel):
-    sump: dict | None = None
-    cleanouts: list[dict] = []
-    discharge: dict | None = None
+    sump: Pt | None = None
+    cleanouts: list[Pt] | None = None
+    discharge: Discharge | None = None
     reset: bool = False
 
 
@@ -654,21 +667,25 @@ async def edit_drain(pid: str, idx: int, body: DrainEdit):
     if pg.get("drain_status") != "ready":
         raise HTTPException(400, "Draw the drain tile layout first")
     ov = pg["drain_overlay"]
+    if ov.get("is_foundation") is False:
+        raise HTTPException(400, "This sheet has no foundation layout")
     original = ov.get("ai_original") or {k: ov.get(k) for k in ("sump", "cleanouts", "discharge")}
     if body.reset:
         ov = {**ov, **original, "edited": False}
     else:
-        clamp = lambda v: max(0.0, min(1000.0, float(v)))  # noqa: E731
-        pt = lambda d: {**d, "x": clamp(d["x"]), "y": clamp(d["y"])}  # noqa: E731
-        try:
-            cleanouts = [pt(c) for c in body.cleanouts]
-            sump = pt(body.sump) if body.sump else ov.get("sump")
-            discharge = {**(body.discharge or ov.get("discharge") or {})}
-            discharge["points"] = [[clamp(x), clamp(y)] for x, y, *_ in discharge.get("points", [])]
-        except (KeyError, TypeError, ValueError):
-            raise HTTPException(400, "Invalid coordinates")
-        ov = {**ov, "sump": sump, "cleanouts": cleanouts, "discharge": discharge, "ai_original": original,
-              "edited": True, "edited_at": now()}
+        c = lambda v: round(max(0.0, min(1000.0, v)), 1)  # noqa: E731
+        merge = lambda old, p: {**(old or {}), "x": c(p.x), "y": c(p.y), **({"label": p.label} if p.label else {})}  # noqa: E731
+        upd = {}
+        if body.sump:
+            upd["sump"] = merge(ov.get("sump"), body.sump)
+        if body.cleanouts is not None:
+            upd["cleanouts"] = [merge({}, p) for p in body.cleanouts]
+        if body.discharge:
+            if any(v != v or abs(v) == float("inf") for pt in body.discharge.points for v in pt):
+                raise HTTPException(400, "Invalid coordinates")
+            upd["discharge"] = {**(ov.get("discharge") or {}), "points": [[c(x), c(y)] for x, y in body.discharge.points],
+                                **{k: v for k, v in (("to", body.discharge.to), ("label", body.discharge.label)) if v}}
+        ov = {**ov, **upd, "ai_original": original, "edited": True, "edited_at": now()}
     await set_page(pid, idx, {"drain_overlay": ov})
     return ov
 
@@ -846,6 +863,11 @@ async def migrate_legacy():
 
 
 app.include_router(api)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(_, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"detail": [{"loc": e.get("loc"), "msg": e.get("msg")} for e in exc.errors()]})
 app.add_middleware(CORSMiddleware, allow_credentials=True,
                    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
                    allow_methods=["*"], allow_headers=["*"])

@@ -41,3 +41,6 @@ FastAPI (server.py, ai.py, storage.py) + MongoDB (projects, messages) + React (W
 
 ## Iteration 6 (2026-06)
 - Drain tile overlay (Drainage tab): AI traces foundation outline on chosen sheet and lays out drain tile route, cleanouts, sump/outlet, discharge and slope arrows (normalized coords); interactive SVG layers + animated flow; server-rendered PNG for crews (legend placed away from sump); included in full/foundation/waterproofing PDFs
+
+## Iteration 7 (2026-06)
+- Drag To Adjust: "Adjust on site" edit mode on drain tile layout — drag sump (discharge follows), outlet, cleanouts; add/remove cleanouts; save (FIELD-ADJUSTED badge), cancel, restore AI layout; PNG + PDFs use saved field positions; touch-friendly handles

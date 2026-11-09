@@ -44,7 +44,7 @@ const Overlay = ({ ov, aspect, on, edit, sel, onDrag, onSelect }) => {
 
   return (
     <svg ref={svgRef} viewBox={`0 0 1000 ${H}`} className={`absolute inset-0 w-full h-full ${edit ? "drain-editing" : ""}`} data-testid="drain-overlay-svg"
-      onPointerMove={move} onPointerUp={end} onPointerCancel={end} style={edit ? { touchAction: "none" } : undefined}>
+      onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
       <defs>
         {[["slope", C.slope], ["discharge", C.discharge]].map(([k, c]) => (
           <marker key={k} id={`arrow-${k}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill={c} /></marker>
@@ -95,7 +95,10 @@ const applyDrag = (ov, target, x, y) => {
 const EditBar = ({ draft, sel, setDraft, setSel, save, cancel, reset, saving, edited }) => {
   const add = () => {
     const n = (draft.cleanouts || []).length;
-    setDraft({ ...draft, cleanouts: [...(draft.cleanouts || []), { x: 500, y: 500, label: `CO-${n + 1}` }] });
+    const used = new Set((draft.cleanouts || []).map((c) => c.label));
+    let k = n + 1;
+    while (used.has(`CO-${k}`)) k++;
+    setDraft({ ...draft, cleanouts: [...(draft.cleanouts || []), { x: 500, y: 500, label: `CO-${k}` }] });
     setSel({ kind: "cleanout", i: n });
   };
   const remove = () => { setDraft({ ...draft, cleanouts: draft.cleanouts.filter((_, i) => i !== sel.i) }); setSel(null); };
@@ -125,17 +128,19 @@ export const DrainOverlay = ({ project, onChange }) => {
   const [draft, setDraft] = useState(null);
   const [sel, setSel] = useState(null);
   const [saving, setSaving] = useState(false);
-  const saved = page.drain_overlay;
+  const [kept, setKept] = useState(null);
+  const saved = kept || page.drain_overlay;
   const ov = draft || saved;
   const status = page.drain_status || "none";
   const editing = !!draft;
 
-  useEffect(() => { setDraft(null); setSel(null); }, [page.index]);
+  useEffect(() => { setDraft(null); setSel(null); setKept(null); }, [page.index]);
+  useEffect(() => { setKept(null); }, [page.drain_overlay]);
 
   const startEdit = () => { setOn({ ...on, cleanouts: true, sump: true }); setDraft(JSON.parse(JSON.stringify(saved))); };
   const persist = async (body, msg) => {
     setSaving(true);
-    try { await editDrainOverlay(project.id, page.index, body); toast.success(msg); setDraft(null); setSel(null); onChange(); }
+    try { setKept(await editDrainOverlay(project.id, page.index, body)); toast.success(msg, { position: "top-center" }); setDraft(null); setSel(null); onChange(); }
     catch (e) { toast.error(e.response?.data?.detail || "Could not save layout"); }
     finally { setSaving(false); }
   };
