@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 5: focused on the new Drainage plan tab, plus regression checks of ICF, Waterproofing, Crew packets, Reports and Photos. Backend: 16/16 in the new test_iter5_drainage.py passed. It made real Gemini calls for drainage and crew_waterproofing on TEST_Iter4 Set, ran PATCH checks (including 404 for a bad index or another tool, and 422), and checked the crew and full PDFs. iter4 fast regression: 14 passed, 1 skipped. Frontend on Smith: the Drainage tab shows strategy, summary, filter chips with correct counts (All 11 / Missing 9 / Specified 2 / Unclear 0), quantities on all 11 items, sequence, inspections and RFIs. Verify persists after reload and is kept separate from the Waterproofing list. ICF: icf-zero-warning is now present. Setting height 0 to 8 on IW1 recalculated to 51 straight / 12 corner / 8.53 yd³ (hand-checked correct), then restored. Report dialog: the Foundation crew prepare flow went prepare, running, ready and downloaded a 12-page PDF with the FOUNDATION CREW PACKET title, briefing, ICF, Waterproofing and Drainage plan sections, and the header now reads 'Foundation Crew Packet'. Photos on the TEST project: upload, analyzing, analysis with issues and fix steps, follow-up answered in photo-thread-0, then delete. All worked with no page errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/projects/{id}/report (wp_section, used by Waterproofing AND Drainage)", "issue": "Still not fixed from iter4. Unverified items use the glyph U+2610, which Helvetica lacks, so it renders as a filled black square that looks 'checked' (confirmed by rendering page 7 of the foundation packet). 'MEDIUM' wraps to 'MEDIU M' in the 0.55in Sev column."},
+      {"endpoint": "POST /api/projects/{id}/tools/{tool}", "issue": "Still no guard against starting a tool while it is already running (duplicate Gemini jobs). Re-running waterproofing or drainage resets every 'verified' flag to False with no warning, so on-site verification work is lost."},
+      {"endpoint": "run_photo follow-up", "issue": "Unchanged: a failed follow-up sets the whole photo to status 'failed' even though the analysis is still valid."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "DrainagePlan Steps (drainage-sequence)", "issue": "Double numbering, e.g. '1. 1. Install erosion control...'. The AI returns already-numbered strings and Steps adds its own index. Strip a leading '^\\d+[.)]\\s*' or tell the prompt not to number.", "selector": "[data-testid=drainage-sequence]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Drainage tab", "issues": ["WpBody is reused, so the drainage list also has data-testid='waterproofing-checklist' and 'wp-*' test ids (works, but is ambiguous).", "The re-read button gives no confirm/warning that verified checks will be cleared."]},
+      {"screen": "Mobile 390px", "issues": ["Five tabs now scroll horizontally. 'Sheets'/'ICF' are scrolled off-screen with no scroll cue (acceptable, but a fade or arrow would help)."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter5_drainage.py", "/app/backend/tests/test_iter4_tools_photos.py", "/app/test_reports/pytest/iter5.xml"],
+  "action_items": [
+    "report.py wp_section: replace the U+2610/U+2713 glyphs with Helvetica-safe text ('[ ]'/'[x]' or 'No'/'Yes'), or register a DejaVu TTF font; widen the Sev column (0.55 to about 0.7in) so 'MEDIUM' does not wrap",
+    "DrainagePlan Steps: strip leading numbers from AI items (or adjust DRAIN_PROMPT) to avoid '1. 1.'",
+    "run_tool for checklists: carry 'verified' forward by matching category+item on re-run, or warn before re-reading; return 409 if the tool is already running",
+    "run_photo: when a follow-up fails, keep status 'ready' and set a thread error instead"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 776 lines (>700). Split the tools/photos/report routes into routers.",
+    "start_tool checks the tool name only after get_project, so an unknown project with an unknown tool returns a project 404. That is fine, just noting it.",
+    "The crew report sheet filter `str(n).isdigit() or isinstance(n, int)` can let a negative int through as index -2. This is harmless since no page matches."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter5_drainage.py"],
+  "success_rate": {"backend": "100% (16/16 new + 14/14 iter4 fast, 1 skipped)", "frontend": "~97% (all specified flows work; only cosmetic issues)"},
+  "seed_data_creation": "TEST_Iter4 Set (21f16323-...): drainage and crew_waterproofing are now ready, drainage item 0 is verified=True, and ICF data was overwritten with example wall W1. On Smith: crew_foundation was prepared via the UI (now ready). Drainage and WP verify toggles and the ICF IW1 height edit were all restored. One TEST_ photo was uploaded on the TEST project and then deleted. A full report run with a test photo was not done on Smith.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend/tests && REACT_APP_BACKEND_URL=... pytest test_iter5_drainage.py -n 0 (about 2 min, real Gemini; uses TEST_PID env or TEST_Iter4 Set). All Smith tools are now ready, including crew_foundation, so the 'crew not prepared' path can only be tested on a new TEST_ project. Smith drainage item 0 was verified=True before testing (left untouched)."
+}

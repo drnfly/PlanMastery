@@ -30,3 +30,11 @@ FastAPI (server.py, ai.py, storage.py) + MongoDB (projects, messages) + React (W
 - Branded PDF takeoff report (reportlab): logo, company/prepared by/phone/email/client, cover + sheet table, per-sheet dims/image/tables/expert notes/verify list, optional Expert Q&A appendix; branding saved globally
 ## Backlog
 - Door/window cut-outs in 3D, ICF block/concrete estimator, waterproofing checklist, per-crew report filters (e.g., foundation crew only)
+
+## Iteration 4-5 (2026-06)
+- ICF material estimator (AI extracts wall runs/footings from whole set → deterministic blocks/corners/concrete yd³/rebar sticks; all inputs editable)
+- Waterproofing checklist + Drainage plan tabs (set-wide, specified/missing/unclear, quantities, sequence, hold points, RFIs, on-site verify checkboxes kept across re-runs)
+- Crew-specific PDF packets (foundation / ICF / waterproofing): AI-picked sheets + briefing, sequence, hold points, RFIs + relevant estimate/checklists
+- Job-site photos: upload/take photo + note → AI compares with plans: issues, step-by-step fixes, next steps, inspections, safety; follow-up Q&A per photo
+## Backlog
+- Door/window cutouts in 3D, split server.py into routers, photo timeline in reports

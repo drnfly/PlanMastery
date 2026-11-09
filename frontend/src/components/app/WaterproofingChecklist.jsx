@@ -71,7 +71,7 @@ export const WaterproofingChecklist = ({ project, onChange }) => (
 const Steps = ({ id, title, items, mark }) => items?.length ? (
   <div className="bg-[#111827] border border-slate-800 rounded-xl p-4" data-testid={id}>
     <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-2">{title}</p>
-    <ul className="space-y-1.5">{items.map((x, i) => <li key={i} className="text-xs text-slate-300 flex gap-2"><span className="font-mono text-amber-400">{mark || `${i + 1}.`}</span>{x}</li>)}</ul>
+    <ul className="space-y-1.5">{items.map((x, i) => <li key={i} className="text-xs text-slate-300 flex gap-2"><span className="font-mono text-amber-400">{mark || `${i + 1}.`}</span>{String(x).replace(/^\s*\d+[.)]\s*/, "")}</li>)}</ul>
   </div>
 ) : null;
 

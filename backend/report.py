@@ -134,7 +134,7 @@ CREW_TITLES = {"foundation": "FOUNDATION CREW PACKET", "icf": "ICF WALL CREW PAC
 def crew_section(packet: dict) -> list:
     flow = [P("Crew briefing", "h2"), P(packet.get("scope"))]
     for key, title, mark in [("sequence", "Work sequence", "•"), ("notes", "Expert notes for crews", "•"),
-                             ("materials", "Materials & specs from plans", "•"), ("inspections", "Hold points & inspections", "✓"),
+                             ("materials", "Materials & specs from plans", "•"), ("inspections", "Hold points & inspections", "•"),
                              ("rfis", "Open questions / RFIs", "?")]:
         if packet.get(key):
             flow += [P(title, "h3")] + bullets(packet[key], mark)
@@ -185,13 +185,13 @@ def wp_section(wp: dict, title: str = "Waterproofing checklist") -> list:
     if wp.get("strategy"):
         flow += [Spacer(1, 4), P("Strategy", "h3"), P(wp["strategy"])]
     order = {"missing": 0, "unclear": 1, "specified": 2}
-    rows = [["✓" if i.get("verified") else "☐", (i.get("status") or "").upper(), (i.get("severity") or "").upper(),
+    rows = [["Yes" if i.get("verified") else "No", (i.get("status") or "").upper(), (i.get("severity") or "").upper(),
              f"{i.get('category')}: {i.get('item')}" + (f" — {i['quantity']}" if i.get("quantity") else ""),
              i.get("spec") or "—", i.get("recommendation"), ", ".join(i.get("sheets") or [])]
             for i in sorted(items, key=lambda i: order.get(i.get("status"), 3))]
-    flow += [Spacer(1, 6), simple_table(["", "Status", "Sev", "Item", "Plans say", "Recommendation", "Sheets"], rows,
-                                        [0.25, 0.75, 0.55, 1.6, 1.5, 1.95, 0.7])]
-    for key, label, mark in [("sequence", "Installation sequence", "•"), ("inspections", "Hold points & inspections", "✓"), ("rfis", "Open questions / RFIs", "?")]:
+    flow += [Spacer(1, 6), simple_table(["Verified", "Status", "Sev", "Item", "Plans say", "Recommendation", "Sheets"], rows,
+                                        [0.6, 0.75, 0.7, 1.5, 1.35, 1.75, 0.65])]
+    for key, label, mark in [("sequence", "Installation sequence", "•"), ("inspections", "Hold points & inspections", "•"), ("rfis", "Open questions / RFIs", "?")]:
         if wp.get(key):
             flow += [P(label, "h3")] + bullets(wp[key], mark)
     return flow + [PageBreak()]

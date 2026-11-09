@@ -381,7 +381,7 @@ async def report(pid: str, body: ReportIn):
         if t.get("status") != "ready":
             raise HTTPException(400, "Prepare the crew packet first")
         packet = t["data"]
-        q["index"] = {"$in": [int(n) - 1 for n in packet.get("sheets", []) if str(n).isdigit() or isinstance(n, int)]}
+        q["index"] = {"$in": [int(n) - 1 for n in packet.get("sheets", []) if str(n).isdigit() and int(n) > 0]}
     elif body.pages is not None:
         q["index"] = {"$in": body.pages}
     pages = await db.pages.find(q, PAGE_LIST).sort("index", 1).to_list(2000)
@@ -452,8 +452,11 @@ async def run_tool(pid: str, tool: str):
         if tool == "icf":
             data = {"extract": data, "calc": icf_compute(data.get("walls", []), data.get("footings", []), {})}
         if tool in CHECKLISTS:
+            prev = ((await db.projects.find_one({"id": pid}, {"_id": 0, f"tools.{tool}.data.items": 1})) or {})
+            prev_items = (((prev.get("tools") or {}).get(tool) or {}).get("data") or {}).get("items") or []
+            done = {(i.get("category", "").lower(), i.get("item", "").lower()) for i in prev_items if i.get("verified")}
             for it in data.get("items", []):
-                it["verified"] = False
+                it["verified"] = (it.get("category", "").lower(), it.get("item", "").lower()) in done
         await set_tool(pid, tool, {"status": "ready", "data": data, "error": None, "updated_at": now()})
     except Exception as e:
         logger.exception(f"tool {tool} failed")
@@ -467,6 +470,8 @@ async def start_tool(pid: str, tool: str, background: BackgroundTasks):
         raise HTTPException(404, "Unknown tool")
     if p["status"] != "ready":
         raise HTTPException(400, "Plans are still processing")
+    if ((p.get("tools") or {}).get(tool) or {}).get("status") == "running":
+        raise HTTPException(409, "Already running")
     await set_tool(pid, tool, {"status": "running", "error": None})
     background.add_task(run_tool, pid, tool)
     return {"status": "running"}
@@ -522,6 +527,10 @@ async def run_photo(photo_id: str, question: str | None = None):
         await db.photos.update_one({"id": photo_id}, {"$set": {"status": "ready", "analysis": analysis, "error": None}})
     except Exception as e:
         logger.exception("photo analysis failed")
+        if question:
+            await db.photos.update_one({"id": photo_id}, {"$set": {"status": "ready"}, "$push": {"thread": {
+                "q": question, "a": "_Sorry — that answer failed. Please ask again._", "created_at": now()}}})
+            return
         await db.photos.update_one({"id": photo_id}, {"$set": {"status": "failed", "error": str(e)[:300]}})
 
 
