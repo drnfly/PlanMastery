@@ -641,6 +641,38 @@ async def start_drain(pid: str, idx: int, background: BackgroundTasks):
     return {"drain_status": "generating"}
 
 
+class DrainEdit(BaseModel):
+    sump: dict | None = None
+    cleanouts: list[dict] = []
+    discharge: dict | None = None
+    reset: bool = False
+
+
+@api.put("/projects/{pid}/pages/{idx}/drain-overlay")
+async def edit_drain(pid: str, idx: int, body: DrainEdit):
+    pg = await get_page(pid, idx)
+    if pg.get("drain_status") != "ready":
+        raise HTTPException(400, "Draw the drain tile layout first")
+    ov = pg["drain_overlay"]
+    original = ov.get("ai_original") or {k: ov.get(k) for k in ("sump", "cleanouts", "discharge")}
+    if body.reset:
+        ov = {**ov, **original, "edited": False}
+    else:
+        clamp = lambda v: max(0.0, min(1000.0, float(v)))  # noqa: E731
+        pt = lambda d: {**d, "x": clamp(d["x"]), "y": clamp(d["y"])}  # noqa: E731
+        try:
+            cleanouts = [pt(c) for c in body.cleanouts]
+            sump = pt(body.sump) if body.sump else ov.get("sump")
+            discharge = {**(body.discharge or ov.get("discharge") or {})}
+            discharge["points"] = [[clamp(x), clamp(y)] for x, y, *_ in discharge.get("points", [])]
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, "Invalid coordinates")
+        ov = {**ov, "sump": sump, "cleanouts": cleanouts, "discharge": discharge, "ai_original": original,
+              "edited": True, "edited_at": now()}
+    await set_page(pid, idx, {"drain_overlay": ov})
+    return ov
+
+
 @api.get("/projects/{pid}/pages/{idx}/drain-overlay.png")
 async def drain_png(pid: str, idx: int):
     pg = await get_page(pid, idx)

@@ -31,6 +31,7 @@ export const askPhoto = (pid, question) => axios.post(`${API}/photos/${pid}/ask`
 export const reanalyzePhoto = (pid) => axios.post(`${API}/photos/${pid}/reanalyze`);
 export const deletePhoto = (pid) => axios.delete(`${API}/photos/${pid}`);
 export const startDrainOverlay = (id, idx) => axios.post(`${API}/projects/${id}/pages/${idx}/drain-overlay`);
+export const editDrainOverlay = (id, idx, body) => axios.put(`${API}/projects/${id}/pages/${idx}/drain-overlay`, body).then((r) => r.data);
 export const fetchDrainPng = (id, idx) =>
   axios.get(`${API}/projects/${id}/pages/${idx}/drain-overlay.png`, { responseType: "blob" }).then((r) => r.data);
 
