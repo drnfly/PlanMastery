@@ -131,7 +131,7 @@ const EditBar = ({ draft, sel, setDraft, setSel, save, cancel, reset, saving, ed
       <p className="text-[11px] text-amber-300 mr-auto flex items-center gap-1.5"><Move className="h-3.5 w-3.5" />Drag sumps, pumps, cleanouts or the green outlets to where they really are on site.</p>
       <button data-testid="drain-add-sump" onClick={addSump} className={`${btn} border-red-500/60 text-red-300 hover:bg-red-500/10 flex items-center gap-1`}><Plus className="h-3.5 w-3.5" />Sump / pump</button>
       <button data-testid="drain-add-cleanout" onClick={add} className={`${btn} border-slate-700 hover:bg-slate-800 flex items-center gap-1`}><Plus className="h-3.5 w-3.5" />Cleanout</button>
-      <button data-testid="drain-remove-cleanout" onClick={remove} disabled={sel?.kind !== "cleanout"} className={`${btn} border-slate-700 hover:bg-slate-800 flex items-center gap-1`}><Trash2 className="h-3.5 w-3.5" />Remove</button>
+      <button data-testid="drain-remove-cleanout" onClick={remove} disabled={sel?.kind !== "cleanout"} className={`${btn} border-slate-700 hover:bg-slate-800 flex items-center gap-1`}><Trash2 className="h-3.5 w-3.5" />Remove cleanout</button>
       {edited && <button data-testid="drain-reset-ai" onClick={reset} disabled={saving} className={`${btn} border-slate-700 hover:bg-slate-800 flex items-center gap-1`}><Undo2 className="h-3.5 w-3.5" />AI layout</button>}
       <button data-testid="drain-edit-cancel" onClick={cancel} disabled={saving} className={`${btn} border-slate-700 hover:bg-slate-800`}>Cancel</button>
       <button data-testid="drain-edit-save" onClick={save} disabled={saving} className={`${btn} border-amber-500 bg-amber-500 text-[#0B0F17] font-semibold hover:bg-amber-400 flex items-center gap-1`}>
@@ -204,7 +204,7 @@ export const DrainOverlay = ({ project, onChange }) => {
       setTimeout(() => URL.revokeObjectURL(href), 2000);
     } catch { toast.error("Could not download the layout"); }
   };
-  const legend = useMemo(() => [[C.tile, `Drain tile${ov?.length_ft ? ` · ${ov.length_ft} LF` : ""}`], [C.discharge, "Discharge"], [C.cleanout, "Cleanout"], [C.sump, "Sump / low point"], [C.slope, "Slope"]], [ov]);
+  const legend = useMemo(() => [[C.tile, `Drain tile${ov?.length_ft ? ` · ${ov.length_ft} LF` : ""}`], [C.discharge, "Discharge"], [C.cleanout, "Cleanout"], [C.sump, "Sump / pump"], [C.slope, "Slope"]], [ov]);
 
   return (
     <div className="bg-[#111827] border border-slate-800 rounded-xl overflow-hidden" data-testid="drain-overlay-panel">

@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 8: tested the 'Add sump / pump' feature for the drain tile layout, backend and frontend. Backend: new file test_iter8_sumps.py (18 tests) and iter7 regression (13 tests), 31/31 pass. Covered saving sumps with clamping and rounding; main sump type/HP/pit fields; a body without sumps leaving them unchanged; sumps [] clearing them; bad type, bad lengths, outlet shape and NaN/Infinity returning 422/400 with no change saved; reset giving sumps [] and edited false; PNG showing red squares, a white dot for pump types and green discharge lines; crew PDF showing extra sumps. UI at 1920 wide: the header 'Add sump / pump' button enters edit mode with SP-2 selected and the form showing; the field edits update the tab live; dragging drain-xsump-0 and drain-xoutlet-0 works; drain-add-sump adds SP-3; sump-toggle-outlet adds and removes the discharge line; the main tab has no remove or toggle buttons; tapping a sump on the sheet selects its tab; save shows the FIELD-ADJUSTED badge and the tabs stay read-only after reload; cancel discards a removal; remove + save persists; 'AI layout' reset removes the added sumps; PNG download works (drain_tile_S-201.png). The 390px mobile layout of sump-panel/sump-form is a clean 2-column grid with no horizontal overflow. TEST_Iter4 page 2 was reset at the end. Smith Residence was not touched.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/projects/{id}/pages/{idx}/drain-overlay", "issue": "Sending only {sump:{x,y}} (no type/pump_hp/pit_size/notes) silently clears the main sump's saved type/HP/pit/notes, because sump_fields always writes SumpPt defaults. The frontend always sends every field, so it is only an API-semantics risk. Consider model_fields_set to update only the fields that were sent."},
+      {"endpoint": "PUT /api/projects/{id}/pages/{idx}/drain-overlay", "issue": "SumpPt.label/Pt.label has no max_length: a 500-char label returned 200, while the frontend limits it to 30. The sumps list length is also unbounded."},
+      {"endpoint": "PUT /api/projects/{id}/pages/{idx}/drain-overlay", "issue": "merge() only sets label when it is non-empty, so the main sump's label cannot be cleared (the old label is kept)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Drainage > Drain tile layout edit mode", "issues": [
+        "Every new sump spawns at the same fixed spot (480,480, outlet 560,420), so adding two in a row stacks them exactly on top of each other. Offset each new sump.",
+        "The edit-bar 'Remove' button only removes cleanouts (disabled when a sump is selected). Its generic label is ambiguous now that sumps exist; consider 'Remove cleanout'.",
+        "The sump-remove trash icon button has no aria-label/title.",
+        "In read mode the sump-tab-* buttons are clickable but do nothing (no-op cursor/hover)."
+      ]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter8_sumps.py", "/app/backend/tests/test_iter7_drain_edit.py", "/app/test_reports/pytest/iter8_sumps.xml"],
+  "action_items": [
+    "Optional: in edit_drain, apply the main-sump type/pump_hp/pit_size/notes only when they are in body.sump.model_fields_set",
+    "Optional: add max_length to Pt.label (e.g. 60) and a max_length for the sumps list",
+    "Optional: offset newSump() defaults so repeated adds don't overlap"
+  ],
+  "critical_code_review_comments": [
+    "server.py edit_drain: sump_fields overwrites the main sump's metadata with defaults on a partial body (see minor issue)",
+    "server.py: ai_original saved before this feature lacks the 'sumps' key; reset handles that with 'sumps': original.get('sumps') or [] (verified OK)",
+    "overlay.py: extra-sump discharge lines have no text label (the main discharge says 'DISCHARGE/TO DAYLIGHT'); fine but maybe label them",
+    "SumpPanel.jsx/DrainOverlay.jsx newSump logic is duplicated in the header button (startEdit(true)), EditBar.addSump and SumpPanel.add; small DRY issue"
+  ],
+  "updated_files": ["/app/backend/tests/test_iter8_sumps.py"],
+  "success_rate": {"backend": "100% (31/31)", "frontend": "100% of tested flows"},
+  "seed_data_creation": "None. Temporary TEST_SP-* sumps on TEST_Iter4 page 2 were removed with reset; the final state is sumps [] and edited false.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run with `-n 0` (pytest.ini forces xdist). test_iter8_sumps.py and test_iter7_drain_edit.py both change TEST_Iter4 (21f16323...) page 2 and reset it in teardown; run them serially. The PNG is 3000x2000: the sump square half-size is lw*4 = 40px and the pump white dot is 18px, so check for red off-center. In the UI, sump tab text format is 'LABEL · Type · HP HP'. The prefix selector [data-testid^=drain-xsump-] also matches drain-xsump-discharge-*."
+}

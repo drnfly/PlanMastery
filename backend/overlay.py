@@ -119,7 +119,7 @@ def render_overlay(image: bytes, ov: dict) -> bytes:
         extra_marks.append((x, y))
 
     items = [(TILE, f"Drain tile - {ov.get('pipe_spec') or 'perforated pipe'}" + (f" ({ov['length_ft']} LF)" if ov.get("length_ft") else "")),
-             (DISCHARGE, "Discharge / solid outlet"), (CLEANOUT, "Cleanout"), (SUMP, "Sump / low point"), (SLOPE, "Slope direction")]
+             (DISCHARGE, "Discharge / solid outlet"), (CLEANOUT, "Cleanout"), (SUMP, "Sump / pump (dot = pump)"), (SLOPE, "Slope direction")]
     pad, row = lw * 3, int(font.size * 1.6)
     box_w = int(max(d.textlength(t, font=font) for _, t in items) + pad * 4 + row)
     box_h = row * len(items) + pad * 2

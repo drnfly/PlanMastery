@@ -5,9 +5,11 @@ const typeLabel = (t) => SUMP_TYPES.find(([k]) => k === t)?.[1] || "Sump";
 
 export const newSump = (draft) => {
   const used = new Set([draft.sump?.label, ...(draft.sumps || []).map((s) => s.label)]);
-  let k = (draft.sumps || []).length + 2;
+  const n = (draft.sumps || []).length;
+  let k = n + 2;
   while (used.has(`SP-${k}`)) k++;
-  return { x: 480, y: 480, label: `SP-${k}`, type: "pit_pump", pump_hp: "1/3", pit_size: "18\" x 24\"", notes: "", outlet: [560, 420] };
+  const o = (n % 5) * 40;
+  return { x: 480 + o, y: 480 + o, label: `SP-${k}`, type: "pit_pump", pump_hp: "1/3", pit_size: "18\" x 24\"", notes: "", outlet: [560 + o, 420 + o] };
 };
 
 const Field = ({ label, className = "", children }) => (
@@ -34,7 +36,7 @@ const SumpForm = ({ s, onPatch, onRemove, isMain }) => (
         <button data-testid="sump-toggle-outlet" onClick={() => onPatch({ outlet: s.outlet ? null : [Math.min(s.x + 80, 1000), Math.max(s.y - 60, 0)] })}
           className="flex-1 text-xs border border-emerald-500/50 text-emerald-300 rounded-md px-2 py-1.5 hover:bg-emerald-500/10">{s.outlet ? "No discharge" : "+ Discharge"}</button>
       )}
-      {!isMain && <button data-testid="sump-remove" onClick={onRemove} className="text-xs border border-red-500/50 text-red-300 rounded-md px-2 py-1.5 hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" /></button>}
+      {!isMain && <button data-testid="sump-remove" onClick={onRemove} aria-label="Remove sump" title="Remove sump" className="text-xs border border-red-500/50 text-red-300 rounded-md px-2 py-1.5 hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" /></button>}
     </div>
     <Field label="Notes" className="col-span-2 md:col-span-5"><input data-testid="sump-field-notes" className={inputCls} value={s.notes || ""} maxLength={300} placeholder="Check valve, discharge to daylight 10 ft min…" onChange={(e) => onPatch({ notes: e.target.value })} /></Field>
   </div>
@@ -55,8 +57,8 @@ export const SumpPanel = ({ draft, setDraft, sel, setSel, editing }) => {
       <div className="flex flex-wrap items-center gap-2">
         <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-red-300 mr-1 flex items-center gap-1.5"><Droplet className="h-3.5 w-3.5" />Sumps & pumps</p>
         {all.map((s) => (
-          <button key={s._key} data-testid={`sump-tab-${s._key}`} onClick={() => editing && setSel(s._key === "main" ? { kind: "sump" } : { kind: "xsump", i: s._key })}
-            className={`text-[11px] rounded-full border px-3 py-1 transition-colors ${selKey === s._key ? "border-red-400 bg-red-500/15 text-red-200" : "border-slate-700 text-slate-300 hover:border-slate-500"}`}>
+          <button key={s._key} data-testid={`sump-tab-${s._key}`} disabled={!editing} onClick={() => setSel(s._key === "main" ? { kind: "sump" } : { kind: "xsump", i: s._key })}
+            className={`text-[11px] rounded-full border px-3 py-1 transition-colors disabled:cursor-default ${selKey === s._key ? "border-red-400 bg-red-500/15 text-red-200" : "border-slate-700 text-slate-300 enabled:hover:border-slate-500"}`}>
             {s.label || "SUMP"} <span className="text-slate-500">· {typeLabel(s.type)}{s.pump_hp ? ` · ${s.pump_hp} HP` : ""}</span>
           </button>
         ))}

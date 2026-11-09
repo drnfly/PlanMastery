@@ -646,7 +646,7 @@ async def start_drain(pid: str, idx: int, background: BackgroundTasks):
 class Pt(BaseModel):
     x: float = Field(allow_inf_nan=False)
     y: float = Field(allow_inf_nan=False)
-    label: str = ""
+    label: str = Field("", max_length=60)
 
 
 SumpType = Literal["", "pit", "pump", "pit_pump", "ejector", "outlet"]
@@ -668,8 +668,8 @@ class Discharge(BaseModel):
 
 class DrainEdit(BaseModel):
     sump: SumpPt | None = None
-    sumps: list[SumpPt] | None = None
-    cleanouts: list[Pt] | None = None
+    sumps: list[SumpPt] | None = Field(None, max_length=50)
+    cleanouts: list[Pt] | None = Field(None, max_length=100)
     discharge: Discharge | None = None
     reset: bool = False
 
@@ -689,7 +689,8 @@ async def edit_drain(pid: str, idx: int, body: DrainEdit):
         c = lambda v: round(max(0.0, min(1000.0, v)), 1)  # noqa: E731
         merge = lambda old, p: {**(old or {}), "x": c(p.x), "y": c(p.y), **({"label": p.label} if p.label else {})}  # noqa: E731
         finite = lambda pts: all(v == v and abs(v) != float("inf") for pt in pts for v in pt)  # noqa: E731
-        sump_fields = lambda s: {"type": s.type, "pump_hp": s.pump_hp.strip(), "pit_size": s.pit_size.strip(), "notes": s.notes.strip()}  # noqa: E731
+        sump_fields = lambda s: {k: getattr(s, k).strip() if isinstance(getattr(s, k), str) else getattr(s, k)  # noqa: E731
+                                 for k in ("type", "pump_hp", "pit_size", "notes") if k in s.model_fields_set}
         upd = {}
         if body.sump:
             upd["sump"] = {**merge(ov.get("sump"), body.sump), **sump_fields(body.sump)}

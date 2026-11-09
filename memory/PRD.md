@@ -44,3 +44,4 @@ FastAPI (server.py, ai.py, storage.py) + MongoDB (projects, messages) + React (W
 
 ## Iteration 7 (2026-06)
 - Drag To Adjust: "Adjust on site" edit mode on drain tile layout — drag sump (discharge follows), outlet, cleanouts; add/remove cleanouts; save (FIELD-ADJUSTED badge), cancel, restore AI layout; PNG + PDFs use saved field positions; touch-friendly handles
+- Sump / pump tab (Iteration 8): "Add sump / pump" on drain tile layout — multiple sumps/pumps, each with type (pit, pump, pit+pump, ejector, daylight outlet), pump HP, pit size, notes and optional own discharge line; draggable; rendered in PNG/PDF
