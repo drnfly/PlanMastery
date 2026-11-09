@@ -20,7 +20,7 @@ export const downloadReport = (id, body) =>
   axios.post(`${API}/projects/${id}/report`, body, { responseType: "blob" }).then((r) => r.data);
 export const runTool = (id, tool) => axios.post(`${API}/projects/${id}/tools/${tool}`);
 export const editIcf = (id, body) => axios.put(`${API}/projects/${id}/tools/icf`, body).then((r) => r.data);
-export const patchWp = (id, i, verified) => axios.patch(`${API}/projects/${id}/tools/waterproofing/items/${i}`, { verified });
+export const patchWp = (id, i, verified, tool = "waterproofing") => axios.patch(`${API}/projects/${id}/tools/${tool}/items/${i}`, { verified });
 export const listPhotos = (id) => axios.get(`${API}/projects/${id}/photos`).then((r) => r.data);
 export const uploadPhoto = (id, file, note) => {
   const fd = new FormData(); fd.append("file", file); fd.append("note", note);

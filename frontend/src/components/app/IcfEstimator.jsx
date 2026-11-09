@@ -52,6 +52,9 @@ const IcfBody = ({ project, data, onChange }) => {
         <Stat id="icf-total-cy" label="Total concrete" value={t.total_cy} unit="yd³" />
         <Stat id="icf-total-rebar" label="Rebar" value={t.rebar_lb} unit="lb" />
       </div>
+      {walls.some((w) => !Number(w.height_ft) || !Number(w.length_ft)) && (
+        <p className="text-xs text-amber-400 flex items-center gap-2" data-testid="icf-zero-warning"><AlertTriangle className="h-4 w-4" />Some walls have no length or height on the plans — enter them below to complete the block and concrete count.</p>
+      )}
       <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
         <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-2">System: <span className="text-slate-300 normal-case tracking-normal">{ex.system || "not specified on plans"}</span></p>
         <div className="grid grid-cols-2 md:grid-cols-6 gap-2">

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Droplets } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Droplets, Waves } from "lucide-react";
 import { toast } from "sonner";
 import { patchWp } from "@/lib/api";
 import { ToolGate } from "@/components/app/ToolGate";
@@ -12,14 +12,15 @@ const STATUS = {
 const SEV = { high: "text-red-400", medium: "text-amber-400", low: "text-slate-400" };
 const FILTERS = ["all", "missing", "unclear", "specified"];
 
-const WpBody = ({ project, data, onChange }) => {
+const WpBody = ({ project, data, onChange, tool = "waterproofing" }) => {
   const [filter, setFilter] = useState("all");
   const [items, setItems] = useState(data.items || []);
+  useEffect(() => { setItems(data.items || []); }, [data]);
   const count = (s) => items.filter((i) => i.status === s).length;
   const toggle = async (idx) => {
     const v = !items[idx].verified;
     setItems(items.map((it, j) => (j === idx ? { ...it, verified: v } : it)));
-    try { await patchWp(project.id, idx, v); onChange(); } catch { toast.error("Could not save"); }
+    try { await patchWp(project.id, idx, v, tool); onChange(); } catch { toast.error("Could not save"); }
   };
   const shown = items.map((it, idx) => ({ ...it, idx })).filter((it) => filter === "all" || it.status === filter);
 
@@ -49,6 +50,7 @@ const WpBody = ({ project, data, onChange }) => {
                 {(it.sheets || []).map((s) => <span key={s} className="font-mono text-[9px] border border-cyan-500/30 text-cyan-300 rounded px-1.5 py-0.5">{s}</span>)}
               </div>
               <p className="text-sm font-medium text-slate-100 mt-1.5">{it.item}</p>
+              {it.quantity && <p className="font-mono text-xs text-cyan-300 mt-1" data-testid={`wp-item-qty-${it.idx}`}>{it.quantity}</p>}
               {it.spec && <p className="text-xs text-slate-400 mt-1"><span className="text-slate-500">Plans say:</span> {it.spec}</p>}
               {it.recommendation && <p className="text-xs text-amber-200/90 mt-1"><span className="text-slate-500">Do:</span> {it.recommendation}</p>}
             </div>
@@ -63,5 +65,34 @@ export const WaterproofingChecklist = ({ project, onChange }) => (
   <ToolGate project={project} tool="waterproofing" title="Waterproofing checklist" icon={Droplets} onChange={onChange}
     blurb="Checks the entire set for membranes, damp-proofing, drainage board, drain tile, waterstops, vapor barriers and every flashing condition — and flags what is missing or unclear.">
     {(data) => <WpBody project={project} data={data} onChange={onChange} />}
+  </ToolGate>
+);
+
+const Steps = ({ id, title, items, mark }) => items?.length ? (
+  <div className="bg-[#111827] border border-slate-800 rounded-xl p-4" data-testid={id}>
+    <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-2">{title}</p>
+    <ul className="space-y-1.5">{items.map((x, i) => <li key={i} className="text-xs text-slate-300 flex gap-2"><span className="font-mono text-amber-400">{mark || `${i + 1}.`}</span>{x}</li>)}</ul>
+  </div>
+) : null;
+
+export const DrainagePlan = ({ project, onChange }) => (
+  <ToolGate project={project} tool="drainage" title="Drainage plan" icon={Waves} onChange={onChange}
+    blurb="Builds a full drainage plan from the set: footing drain tile with quantities, gravel and fabric, discharge and sump, cleanouts, grading, swales, downspouts, window wells and under-slab drainage — flagging what's missing.">
+    {(data) => (
+      <div className="space-y-4" data-testid="drainage-plan">
+        {data.strategy && (
+          <div className="bg-[#111827] border border-cyan-500/30 rounded-xl p-4" data-testid="drainage-strategy">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-400 mb-1">Water path / strategy</p>
+            <p className="text-sm text-slate-200 leading-relaxed">{data.strategy}</p>
+          </div>
+        )}
+        <WpBody project={project} data={data} onChange={onChange} tool="drainage" />
+        <div className="grid md:grid-cols-3 gap-4">
+          <Steps id="drainage-sequence" title="Installation sequence" items={data.sequence} />
+          <Steps id="drainage-inspections" title="Hold points & inspections" items={data.inspections} mark="✓" />
+          <Steps id="drainage-rfis" title="Questions / RFIs" items={data.rfis} mark="?" />
+        </div>
+      </div>
+    )}
   </ToolGate>
 );

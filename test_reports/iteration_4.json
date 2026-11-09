@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 4: tested the ICF estimator, Waterproofing checklist, Crew packets/reports and Job-site photos on both backend and frontend. Backend: 15 fast tests + 8 slow E2E tests with real Gemini on project TEST_Iter4 Set, 23/23 passed. Frontend: tabs, ICF editing/recalc, WP filters and verify persistence, crew packet prepare->running->ready, ICF crew PDF download, photo upload->analyzing->analysis->follow-up->reanalyze->delete all work. One spec'd element is missing: icf-zero-warning.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/projects/{id}/report (wp_section)", "issue": "Unverified checkbox char '☐' (U+2610) is not in Helvetica and renders as a filled black square, which looks like 'checked'. 'MEDIUM' wraps to 'MEDIU M' in the 0.55in Sev column."},
+      {"endpoint": "report.py chrome()", "issue": "Page header always says '<project> · Takeoff report' even on crew packets."},
+      {"endpoint": "PUT /api/projects/{id}/tools/icf", "issue": "Stores raw cell values from the UI. Edited numeric cells are saved as strings (e.g. '8'). The calc handles this via num(), but the stored data types become mixed."},
+      {"endpoint": "POST /api/projects/{id}/tools/{tool}", "issue": "No guard against starting a tool again while it is running, so duplicate Gemini jobs race to write."},
+      {"endpoint": "run_photo follow-up", "issue": "If a follow-up fails, the whole photo status is set to 'failed' even though the analysis is still valid. The user then must reanalyze before asking again."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "IcfEstimator", "issue": "data-testid icf-zero-warning does not exist in IcfEstimator.jsx. There is no warning when walls have height 0 (Smith project shows 0 blocks/0 yd³ with no banner). Only the AI 'missing' list mentions it.", "selector": "[data-testid=icf-zero-warning]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "ReportDialog CrewState.prepare", "issue": "runTool has no try/catch, so an API error gives an unhandled promise rejection and no toast.", "affected_selectors": ["crew-packet-prepare-button"]}
+    ],
+    "design_issues": [
+      {"screen": "Mobile 390px", "issues": ["Project tabs overflow horizontally: 'Waterproofing' is cut off and 'Job photos' is hidden. It scrolls, but there is no visual cue.", "ICF wall grid needs horizontal scroll (acceptable)."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter4_tools_photos.py", "/app/backend/tests/test_iter4_slow_flow.py", "/app/test_reports/pytest/iter4_slow.xml"],
+  "action_items": [
+    "Add icf-zero-warning banner in IcfEstimator when any wall has height_ft 0/empty (or totals are 0 while walls exist)",
+    "Replace '☐'/'✓' table glyphs in wp_section with Helvetica-safe text (e.g. 'No'/'Yes' or '[ ]'/'[x]') or register a DejaVu font; widen Sev column",
+    "Make PDF header say 'Crew packet' for crew reports",
+    "Coerce numeric ICF cell values to numbers before PUT (frontend) or in edit_icf",
+    "Wrap CrewState.prepare in try/catch with toast; optionally reject tool start when already running (409)",
+    "Do not mark photo as failed when only a follow-up fails"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 769 lines (>700): split tools/photos/report routes into modules",
+    "ICF calc verified by hand: example gives 196 straight/24 corner/29.87 wall cy/11.2 footing cy; waste=0 gives 186. Waste is not applied to corner blocks (may be intended)",
+    "With height 0, rebar still includes dowels + footing bars (711 lb on Smith). This is plausible but worth stating in the UI"
+  ],
+  "updated_files": ["/app/backend/tests/test_iter4_tools_photos.py", "/app/backend/tests/test_iter4_slow_flow.py"],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "~95% (all flows work; icf-zero-warning missing)"},
+  "seed_data_creation": "Created project 'TEST_Iter4 Set' (21f16323-6b5c-4d5b-b541-9d61852f4d55) with icf/waterproofing/crew_foundation ready (ICF data overwritten with example wall W1). On Smith: prepared crew_waterproofing via UI (now ready); uploaded and then soft-deleted one TEST_ photo; WP item and ICF wall edits restored.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Fast tests: pytest test_iter4_tools_photos.py. Slow flow (~2-3 min, real Gemini): pytest test_iter4_slow_flow.py -n 0 (pytest.ini adds xdist; must be single worker for ordering). Set TEST_PID env var to use another project. Smith now has crew_icf and crew_waterproofing ready; crew_foundation is still not prepared on Smith."
+}

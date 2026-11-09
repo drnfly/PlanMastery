@@ -176,18 +176,24 @@ def icf_section(icf: dict) -> list:
     return flow + [PageBreak()]
 
 
-def wp_section(wp: dict) -> list:
+def wp_section(wp: dict, title: str = "Waterproofing checklist") -> list:
     items = wp.get("items") or []
     counts = {s: sum(1 for i in items if i.get("status") == s) for s in ("specified", "missing", "unclear")}
-    flow = [P("Waterproofing checklist", "h2"),
+    flow = [P(title, "h2"),
             P(f"{counts['specified']} specified · {counts['missing']} missing · {counts['unclear']} unclear · "
               f"{sum(1 for i in items if i.get('verified'))} verified on site", "meta"), Spacer(1, 4), P(wp.get("summary"))]
+    if wp.get("strategy"):
+        flow += [Spacer(1, 4), P("Strategy", "h3"), P(wp["strategy"])]
     order = {"missing": 0, "unclear": 1, "specified": 2}
     rows = [["✓" if i.get("verified") else "☐", (i.get("status") or "").upper(), (i.get("severity") or "").upper(),
-             f"{i.get('category')}: {i.get('item')}", i.get("spec") or "—", i.get("recommendation"), ", ".join(i.get("sheets") or [])]
+             f"{i.get('category')}: {i.get('item')}" + (f" — {i['quantity']}" if i.get("quantity") else ""),
+             i.get("spec") or "—", i.get("recommendation"), ", ".join(i.get("sheets") or [])]
             for i in sorted(items, key=lambda i: order.get(i.get("status"), 3))]
     flow += [Spacer(1, 6), simple_table(["", "Status", "Sev", "Item", "Plans say", "Recommendation", "Sheets"], rows,
                                         [0.25, 0.75, 0.55, 1.6, 1.5, 1.95, 0.7])]
+    for key, label, mark in [("sequence", "Installation sequence", "•"), ("inspections", "Hold points & inspections", "✓"), ("rfis", "Open questions / RFIs", "?")]:
+        if wp.get(key):
+            flow += [P(label, "h3")] + bullets(wp[key], mark)
     return flow + [PageBreak()]
 
 
@@ -218,7 +224,7 @@ def build_report(project: dict, pages: list, images: dict, brand: dict, logo: by
         c.drawString(x, h - 0.5 * inch, company)
         c.setFont("Helvetica", 8)
         c.setFillColor(SLATE)
-        c.drawRightString(w - 0.6 * inch, h - 0.5 * inch, f"{project['name']} · Takeoff report")
+        c.drawRightString(w - 0.6 * inch, h - 0.5 * inch, f"{project['name']} · {CREW_TITLES.get(crew, 'Takeoff report').title()}")
         c.setStrokeColor(LINE)
         c.line(0.6 * inch, h - 0.7 * inch, w - 0.6 * inch, h - 0.7 * inch)
         c.line(0.6 * inch, 0.62 * inch, w - 0.6 * inch, 0.62 * inch)
@@ -255,6 +261,8 @@ def build_report(project: dict, pages: list, images: dict, brand: dict, logo: by
         flow += icf_section(extras["icf"])
     if extras.get("wp"):
         flow += wp_section(extras["wp"])
+    if extras.get("drain"):
+        flow += wp_section(extras["drain"], "Drainage plan")
 
     for pg in pages:
         flow += sheet_section(pg, images.get(pg["index"]))

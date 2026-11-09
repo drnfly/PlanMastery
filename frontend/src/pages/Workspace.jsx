@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Ruler, Loader2, AlertTriangle, Layers, Boxes, Droplets, Camera } from "lucide-react";
+import { Ruler, Loader2, AlertTriangle, Layers, Boxes, Droplets, Camera, Waves } from "lucide-react";
 import { listProjects, getProject, analyzePage } from "@/lib/api";
 import { Sidebar } from "@/components/app/Sidebar";
 import { UploadPanel } from "@/components/app/UploadPanel";
@@ -11,10 +11,10 @@ import { AnalysisSummary } from "@/components/app/AnalysisSummary";
 import { SheetStrip } from "@/components/app/SheetStrip";
 import { SetToolbar } from "@/components/app/SetToolbar";
 import { IcfEstimator } from "@/components/app/IcfEstimator";
-import { WaterproofingChecklist } from "@/components/app/WaterproofingChecklist";
+import { WaterproofingChecklist, DrainagePlan } from "@/components/app/WaterproofingChecklist";
 import { PhotosPanel } from "@/components/app/PhotosPanel";
 
-const TABS = [["sheets", "Sheets", Layers], ["icf", "ICF estimator", Boxes], ["waterproofing", "Waterproofing", Droplets], ["photos", "Job photos", Camera]];
+const TABS = [["sheets", "Sheets", Layers], ["icf", "ICF estimator", Boxes], ["waterproofing", "Waterproofing", Droplets], ["drainage", "Drainage", Waves], ["photos", "Job photos", Camera]];
 
 const busy = (p, i) => p.status === "processing" || p.pages?.some((pg) => pg.status === "analyzing" || pg.model3d_status === "generating")
   || p.pages?.[i]?.status === "pending" || Object.values(p.tools || {}).some((t) => t.status === "running");
@@ -98,6 +98,7 @@ export default function Workspace() {
               )}
               {view === "icf" && <IcfEstimator project={project} onChange={poke} />}
               {view === "waterproofing" && <WaterproofingChecklist project={project} onChange={poke} />}
+              {view === "drainage" && <DrainagePlan project={project} onChange={poke} />}
               {view === "photos" && <PhotosPanel project={project} />}
             </>
           )}

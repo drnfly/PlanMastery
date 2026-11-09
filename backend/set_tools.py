@@ -34,6 +34,27 @@ Return ONLY valid JSON (no markdown fences):
 Flag as "missing" anything a competent waterproofing detail would require that the plans do not show. Note that ICF foam
 needs solvent-free, ICF-compatible membranes. Cite sheets."""
 
+DRAIN_PROMPT = """Review the ENTIRE plan set below as a civil / geotechnical drainage specialist with ICF foundation experience,
+and build a complete DRAINAGE PLAN for this building and site. Cover at least: Footing drain tile (perforated pipe, size,
+location inside/outside footing), Gravel / aggregate envelope & filter fabric, Drain tile discharge (daylight, sump, storm),
+Sump pit & pump, Cleanouts, Drainage board / foundation wall drainage, Under-slab drainage & capillary break, Backfill
+material & compaction, Finish grading slope away from foundation (min 6" in 10 ft), Swales, Downspouts & leaders,
+Splash blocks / underground roof drain lines, Area drains / window wells, Driveway / hardscape drainage, Retaining wall
+drainage, Erosion & sediment control. Compute quantities where possible from the plans (e.g. drain tile LF from the
+footing perimeter, number of downspouts, cleanouts at each corner / every 100 ft).
+Return ONLY valid JSON (no markdown fences):
+{
+  "summary": "2-3 sentence overall assessment of the drainage design",
+  "strategy": "recommended overall drainage approach for this building in plain words (route of water from roof and soil to discharge)",
+  "items": [{"category": "", "item": "specific drainage component/requirement", "status": "specified | missing | unclear",
+             "sheets": ["S-201"], "spec": "what the plans say, '' if missing", "quantity": "e.g. 140 LF 4\\" perf PVC, or ''",
+             "recommendation": "what the crew/GC should install or ask", "severity": "high | medium | low"}],
+  "sequence": ["ordered installation steps for the drainage work"],
+  "inspections": ["hold points / inspections (e.g. drain tile before backfill)"],
+  "rfis": ["questions for the engineer / GC"]
+}
+Flag as "missing" anything a competent drainage plan requires that the plans do not show. Cite sheets."""
+
 CREWS = {
     "foundation": "Foundation crew: excavation, footings, footing rebar, dowels, slab-on-grade, under-slab vapor barrier, drain tile, backfill",
     "icf": "ICF wall crew: ICF block layout, corners, bucks/openings, bracing & alignment, wall rebar, embedments/anchor bolts, pour sequencing and lift heights",

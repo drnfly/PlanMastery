@@ -25,7 +25,7 @@ from processing import open_pdf, process_pdf_page, process_image  # noqa: E402
 from ai_engine import index_sheets, analyze_sheet, model_sheet, stream_chat, temp_file, pick_sheets  # noqa: E402
 from report import build_report  # noqa: E402
 from icf_calc import compute as icf_compute  # noqa: E402
-from set_tools import ICF_PROMPT, WP_PROMPT, CREWS, set_json, crew_prompt, analyze_photo, photo_followup  # noqa: E402
+from set_tools import ICF_PROMPT, WP_PROMPT, DRAIN_PROMPT, CREWS, set_json, crew_prompt, analyze_photo, photo_followup  # noqa: E402
 from contextlib import ExitStack  # noqa: E402
 
 client = AsyncIOMotorClient(os.environ['MONGO_URL'])
@@ -85,10 +85,12 @@ class PhotoAsk(BaseModel):
     question: str
 
 
-TOOLS = {"icf", "waterproofing", "crew_foundation", "crew_icf", "crew_waterproofing"}
+TOOLS = {"icf", "waterproofing", "drainage", "crew_foundation", "crew_icf", "crew_waterproofing"}
+CHECKLISTS = {"waterproofing", "drainage"}
 TOOL_QUERY = {
     "icf": "ICF foundation walls, wall sections, foundation plan, footings, rebar schedule, structural notes",
     "waterproofing": "waterproofing, foundation details, wall sections, drain tile, flashing, roof, envelope details",
+    "drainage": "site plan, grading, drain tile, foundation plan, sump, downspouts, roof plan, civil drainage details",
     "crew_foundation": "foundation plan, footings, slab, drain tile, structural notes",
     "crew_icf": "ICF walls, wall sections, rebar, openings, foundation plan, structural notes",
     "crew_waterproofing": "waterproofing, drainage, flashing, foundation details, wall sections",
@@ -401,6 +403,8 @@ async def report(pid: str, body: ReportIn):
         extras["icf"] = tools["icf"]["data"]
     if body.crew in ("full", "foundation", "waterproofing") and (tools.get("waterproofing") or {}).get("status") == "ready":
         extras["wp"] = tools["waterproofing"]["data"]
+    if body.crew in ("full", "foundation", "waterproofing") and (tools.get("drainage") or {}).get("status") == "ready":
+        extras["drain"] = tools["drainage"]["data"]
     pdf = await asyncio.to_thread(build_report, p, pages, images, brand, logo, qa, extras)
     suffix = "takeoff_report" if body.crew == "full" else f"{body.crew}_crew_packet"
     fname = re.sub(r"[^A-Za-z0-9_-]+", "_", p["name"])[:60] + f"_{suffix}.pdf"
@@ -443,11 +447,11 @@ async def run_tool(pid: str, tool: str):
         srcs = await picked_sources(pages, TOOL_QUERY[tool])
         with ExitStack() as st:
             files = [(st.enter_context(temp_file(d, e)), m) for d, e, m in srcs]
-            prompt = ICF_PROMPT if tool == "icf" else WP_PROMPT if tool == "waterproofing" else crew_prompt(tool[5:])
+            prompt = {"icf": ICF_PROMPT, "waterproofing": WP_PROMPT, "drainage": DRAIN_PROMPT}.get(tool) or crew_prompt(tool[5:])
             data = await set_json(prompt, set_context(pages), files)
         if tool == "icf":
             data = {"extract": data, "calc": icf_compute(data.get("walls", []), data.get("footings", []), {})}
-        if tool == "waterproofing":
+        if tool in CHECKLISTS:
             for it in data.get("items", []):
                 it["verified"] = False
         await set_tool(pid, tool, {"status": "ready", "data": data, "error": None, "updated_at": now()})
@@ -481,13 +485,15 @@ async def edit_icf(pid: str, body: IcfEdit):
     return data
 
 
-@api.patch("/projects/{pid}/tools/waterproofing/items/{i}")
-async def patch_wp(pid: str, i: int, body: WpPatch):
+@api.patch("/projects/{pid}/tools/{tool}/items/{i}")
+async def patch_wp(pid: str, tool: str, i: int, body: WpPatch):
+    if tool not in CHECKLISTS:
+        raise HTTPException(404, "Unknown checklist")
     p = await get_project(pid)
-    items = (((p.get("tools") or {}).get("waterproofing") or {}).get("data") or {}).get("items") or []
+    items = (((p.get("tools") or {}).get(tool) or {}).get("data") or {}).get("items") or []
     if not 0 <= i < len(items):
         raise HTTPException(404, "Item not found")
-    await db.projects.update_one({"id": pid}, {"$set": {f"tools.waterproofing.data.items.{i}.verified": body.verified}})
+    await db.projects.update_one({"id": pid}, {"$set": {f"tools.{tool}.data.items.{i}.verified": body.verified}})
     return {"ok": True}
 
 
