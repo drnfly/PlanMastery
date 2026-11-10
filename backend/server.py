@@ -726,13 +726,14 @@ async def drain_takeoff_for(p: dict, idx: int | None) -> tuple[dict, dict] | Non
     idx = saved.get("page_index") if idx is None else idx
     q = {"project_id": p["id"], "drain_status": "ready"}
     pg = await db.pages.find_one({**q, "index": idx}, PAGE_LIST) if idx is not None else None
-    pg = pg or await db.pages.find_one(q, PAGE_LIST, sort=[("index", 1)])
+    pg = pg or await db.pages.find_one({**q, "drain_overlay.is_foundation": {"$ne": False}}, PAGE_LIST, sort=[("index", 1)])
     if not pg or pg["drain_overlay"].get("is_foundation") is False:
         return None
     base = derive_takeoff(pg["drain_overlay"], pg, ((p.get("tools") or {}).get("drainage") or {}).get("data"))
     params = {**base, **(saved.get("params") or {})} if saved.get("page_index") == pg["index"] else base
+    overrides = {k: v for k, v in (saved.get("params") or {}).items() if saved.get("page_index") == pg["index"] and v != base.get(k)}
     return pg, {**compute_takeoff(pg["drain_overlay"], params), "page_index": pg["index"], "sheet": sheet_label(pg),
-                "derived": base, "edited": saved.get("page_index") == pg["index"] and bool(saved.get("params"))}
+                "derived": base, "edited": bool(overrides)}
 
 
 @api.get("/projects/{pid}/drain-takeoff")

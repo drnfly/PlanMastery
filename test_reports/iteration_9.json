@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 9: tested the drainage material takeoff, backend and frontend. Backend: new test_iter9_drain_takeoff.py (14 tests) plus the iter7 and iter8 regression suites, 45/45 pass with -n 0 after one fix. Checked against the defaults: perforated 154 LF / 16 sticks, stone 5.7 CY ≈ 8.0 tons, fabric 644 SF, couplings 15, corners 4, cleanouts 3. A PUT with waste 20 gives 168 LF and edited true, unknown keys are dropped, and params {} resets. -1, 1e7 and NaN are rejected. page 0 (not a foundation sheet) and page 99 return 400 on PUT; page 0 returns 404 on GET. Adding pump and ejector sumps with an outlet through the drain-overlay PUT adds the pump, check valve and pump discharge lines; the 'outlet' type is left out of the basins. The full, foundation and waterproofing PDFs all contain 'Drainage material takeoff'. FOUND AND FIXED a bug where GET without ?page picked the first ready page even when it was not a foundation sheet, so it returned 404. This affected real project 'Architectural Plans - 1408 Post Oak Place' (c5675b5d), where page 0 is not a foundation sheet and page 3 has a layout. TEST_Iter4 hid the bug only because a saved page_index=2 already existed. UI: column order is Group, Material, Qty, Unit, Spec, Notes. waste 20 + blur gives 168 with the input amber and other inputs not amber. The reset button is hidden until a value is edited and then restores 154. -5 is reverted. The CSV downloads (TEST_Iter4_Set_drainage_takeoff.csv). Add sump / pump with pump type, discharge and Save layout refreshes the table with Sump/ejector pumps, Check valves and Pump discharge pipe rows. At 390px the table scrolls inside its box (640 vs 356) and Qty is visible without scrolling. The missing panel was checked with a mocked 404, since no project has a drainage plan but no layout. Post Oak now shows the takeoff table.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/projects/{id}/drain-takeoff (as called by DrainTakeoff.jsx)", "issue": "Layout values freeze after one edit. commit() sends the whole data.params object (every layout-derived value), so all of them are saved as overrides. If the layout changes later (for example a pump sump with an outlet is added), the values stay stale. Reproduced: after waste=20 was saved this way, adding a pump sump with an outlet gave derived pump_discharge_lf 8.9 but used 0.0, so the 'Pump discharge pipe' row is missing. tile_lf and wall perimeter would also go stale if the layout is redrawn."},
+      {"endpoint": "GET /api/projects/{id}/drain-takeoff?page=N", "issue": "An invalid page (e.g. 99, or a page with no layout) silently falls back to the first foundation layout instead of returning 404. This is acceptable, but the response page_index differs from the page that was requested."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Edit takeoff input then change layout", "issue": "See the stale-override issue: after any input edit, later layout changes do not reach the derived inputs (pump discharge LF, tile LF, wall LF), and those inputs then show amber even though the user never changed them.", "affected_selectors": ["drain-takeoff-param-pump_discharge_lf", "drain-takeoff-param-tile_lf"]}
+    ],
+    "design_issues": [
+      {"screen": "Drainage takeoff", "issues": ["The notes text says '1 rolls @ 1800 SF'. It should say '1 roll' when the count is 1.", "DrainTakeoff only renders inside the DrainagePlan ToolGate, so the takeoff cannot be seen until the AI drainage plan has run."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter9_drain_takeoff.py", "/app/test_reports/pytest/iter9_takeoff.xml"],
+  "action_items": [
+    "In DrainTakeoff.jsx commit(), send only the keys whose value differs from data.derived, e.g. Object.fromEntries(Object.entries({...vals,[k]:v}).filter(([kk,vv]) => Number(vv) !== Number(data.derived[kk]))). Do this instead of sending all of data.params, so layout-derived inputs keep following the layout.",
+    "Review the server.py drain_takeoff_for fallback fix (the fallback query now skips is_foundation False pages)."
+  ],
+  "critical_code_review_comments": [
+    "server.py drain_takeoff_for: the fallback find_one had no is_foundation filter (fixed). The explicit ?page=0 still returns 404 because that page exists and is not a foundation sheet.",
+    "drain_takeoff.compute: fabric_sf has no waste factor (only overlap) while the other materials include waste. This may be intended.",
+    "drain_takeoff.compute: the main 'sump' counts as a basin whenever x is not None, even if its type is unset. A main sump with type 'outlet' correctly does not count.",
+    "TakeoffIn.params dict[str, float|None] accepts NaN through Python's json parsing, but the server check v != v catches it (400)."
+  ],
+  "updated_files": ["/app/backend/server.py (drain_takeoff_for fallback query: added drain_overlay.is_foundation $ne False)", "/app/backend/tests/test_iter9_drain_takeoff.py"],
+  "success_rate": {"backend": "100% (45/45) after fix", "frontend": "100% of tested flows (stale-override integration issue noted)"},
+  "seed_data_creation": "None. The TEST_SP-* sumps on TEST_Iter4 page 2 were reset (sumps [] and edited false), and the takeoff was reset (params {} and edited false). Smith Residence and Post Oak were only read.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run with -n 0. test_iter9_drain_takeoff.py, test_iter8_sumps.py and test_iter7_drain_edit.py all change TEST_Iter4 page 2 and reset it in teardown. TEST_Iter4 already has tools.drain_takeoff.page_index=2 saved, which hides any default-page bugs. Use Post Oak c5675b5d (read-only, page 0 is not a foundation sheet) to check the default page. DrainTakeoff renders only when the drainage tool is ready, and no project has a drainage plan without a layout, so test the missing state with a page.route 404 mock."
+}

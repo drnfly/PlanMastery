@@ -66,6 +66,7 @@ def compute(ov: dict, params: dict) -> dict:
     solid_lf = (p["discharge_lf"] + riser_lf + p["downspouts"] * p["downspout_leader_lf"]) * waste
     pump_lf = p["pump_discharge_lf"] * waste
     r = lambda v, d=1: round(v, d)  # noqa: E731
+    rolls = lambda sf, per: (lambda n: f"{n} roll{'s' if n != 1 else ''} @ {per:g} SF")(math.ceil(sf / per) if per else 0)  # noqa: E731
     lines = [
         ("Pipe", "Perforated drain tile", f"{dia} perforated PVC/HDPE, sock optional", r(tile_lf), "LF", f"{sticks} sticks @ {p['pipe_stick_ft']:g}'"),
         ("Pipe", "Solid pipe — outlet, cleanout risers, leaders", f"{dia} solid PVC SDR-35", r(solid_lf), "LF", f"{math.ceil(solid_lf / p['pipe_stick_ft']) if p['pipe_stick_ft'] else 0} sticks"),
@@ -75,8 +76,8 @@ def compute(ov: dict, params: dict) -> dict:
         ("Fittings", "Outlet rodent guard / end grate", dia, outlets, "EA", "each daylight / discharge end"),
         ("Fittings", "Downspout adapters", f'{dia} x leader', int(p["downspouts"]), "EA", ""),
         ("Aggregate", "Washed drain stone", '3/4" clean, no fines', r(stone_cy, 2), "CY", f"≈ {r(stone_cy * p['stone_tons_per_cy'], 1)} tons"),
-        ("Geotextile", "Non-woven filter fabric", "wrap stone envelope", r(fabric_sf, 0), "SF", f"{math.ceil(fabric_sf / p['fabric_roll_sf']) if p['fabric_roll_sf'] else 0} rolls @ {p['fabric_roll_sf']:g} SF"),
-        ("Wall", "Drainage board / dimple mat", "foundation wall face", r(board_sf, 0), "SF", f"{math.ceil(board_sf / p['board_roll_sf']) if p['board_roll_sf'] else 0} rolls @ {p['board_roll_sf']:g} SF"),
+        ("Geotextile", "Non-woven filter fabric", "wrap stone envelope", r(fabric_sf, 0), "SF", rolls(fabric_sf, p["fabric_roll_sf"])),
+        ("Wall", "Drainage board / dimple mat", "foundation wall face", r(board_sf, 0), "SF", rolls(board_sf, p["board_roll_sf"])),
         ("Sump", "Sump basins", ", ".join(s.get("pit_size") or "per plan" for s in basins) or "—", len(basins), "EA", ", ".join(s.get("label") or "SUMP" for s in basins)),
         ("Sump", "Sump / ejector pumps", ", ".join(f"{s.get('pump_hp') or '?'} HP" for s in pumps) or "—", len(pumps), "EA", ", ".join(s.get("label") or "SUMP" for s in pumps)),
         ("Sump", "Check valves + unions", f'{p["pump_pipe_dia_in"]:g}"', len(pumps), "EA", "one per pump"),

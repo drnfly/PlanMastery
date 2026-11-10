@@ -32,11 +32,12 @@ export const DrainTakeoff = ({ project, refreshKey }) => {
     catch (e) { toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Check the values"); setVals(data.params); }
     finally { setSaving(false); }
   };
+  const overrides = (all) => Object.fromEntries(Object.entries(all).filter(([k, v]) => Number(v) !== Number(data.derived[k])));
   const commit = (k) => {
     const v = Number(vals[k]);
     if (String(vals[k]) === String(data.params[k])) return;
     if (!Number.isFinite(v) || v < 0) { toast.error("Enter a positive number"); setVals(data.params); return; }
-    save({ ...data.params, [k]: v });
+    save(overrides({ ...data.params, [k]: v }));
   };
   const exportCsv = () => {
     const href = URL.createObjectURL(new Blob([toCsv(data.lines)], { type: "text/csv" }));

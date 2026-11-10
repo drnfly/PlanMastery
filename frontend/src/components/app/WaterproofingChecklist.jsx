@@ -78,6 +78,7 @@ const Steps = ({ id, title, items, mark }) => items?.length ? (
 ) : null;
 
 export const DrainagePlan = ({ project, onChange }) => (
+  <div className="space-y-4">
   <ToolGate project={project} tool="drainage" title="Drainage plan" icon={Waves} onChange={onChange}
     blurb="Builds a full drainage plan from the set: footing drain tile with quantities, gravel and fabric, discharge and sump, cleanouts, grading, swales, downspouts, window wells and under-slab drainage — flagging what's missing.">
     {(data) => (
@@ -89,8 +90,6 @@ export const DrainagePlan = ({ project, onChange }) => (
           </div>
         )}
         <WpBody project={project} data={data} onChange={onChange} tool="drainage" />
-        <DrainOverlay project={project} onChange={onChange} />
-        <DrainTakeoff project={project} refreshKey={project.pages.map((p) => `${p.drain_status}:${p.drain_overlay?.edited_at || ""}:${p.drain_overlay?.edited}`).join("|")} />
         <div className="grid md:grid-cols-3 gap-4">
           <Steps id="drainage-sequence" title="Installation sequence" items={data.sequence} />
           <Steps id="drainage-inspections" title="Hold points & inspections" items={data.inspections} mark="✓" />
@@ -99,4 +98,7 @@ export const DrainagePlan = ({ project, onChange }) => (
       </div>
     )}
   </ToolGate>
+  <DrainOverlay project={project} onChange={onChange} />
+  <DrainTakeoff project={project} refreshKey={project.pages.map((p) => `${p.drain_status}:${p.drain_overlay?.edited_at || ""}:${p.drain_overlay?.edited}`).join("|")} />
+  </div>
 );
