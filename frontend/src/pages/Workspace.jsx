@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Ruler, Loader2, AlertTriangle, Layers, Boxes, Droplets, Camera, Waves } from "lucide-react";
 import { listProjects, getProject, analyzePage } from "@/lib/api";
@@ -20,18 +21,23 @@ const busy = (p, i) => p.status === "processing" || p.pages?.some((pg) => pg.sta
   || p.pages?.[i]?.status === "pending" || Object.values(p.tools || {}).some((t) => t.status === "running");
 
 export default function Workspace() {
+  const [params] = useSearchParams();
   const [projects, setProjects] = useState([]);
-  const [activeId, setActiveId] = useState(null);
+  const [activeId, setActiveId] = useState(params.get("project"));
   const [project, setProject] = useState(null);
   const [pageIdx, setPageIdx] = useState(0);
   const [tick, setTick] = useState(0);
-  const [view, setView] = useState("sheets");
+  const [view, setView] = useState(params.get("tab") || "sheets");
+  const firstLoad = useRef(true);
 
   const refreshList = useCallback(() => listProjects().then(setProjects).catch(() => toast.error("Could not load projects")), []);
   const poke = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => { refreshList(); }, [refreshList]);
-  useEffect(() => { setPageIdx(0); setView("sheets"); }, [activeId]);
+  useEffect(() => {
+    if (firstLoad.current) { firstLoad.current = false; return; }
+    setPageIdx(0); setView("sheets");
+  }, [activeId]);
 
   useEffect(() => {
     if (!activeId) { setProject(null); return; }

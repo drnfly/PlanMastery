@@ -3,8 +3,9 @@ import { Droplets, Waves } from "lucide-react";
 import { toast } from "sonner";
 import { patchWp } from "@/lib/api";
 import { ToolGate } from "@/components/app/ToolGate";
-import { DrainOverlay } from "@/components/app/DrainOverlay";
 import { DrainTakeoff } from "@/components/app/DrainTakeoff";
+import { useNavigate } from "react-router-dom";
+import { ArrowRight, Spline } from "lucide-react";
 
 const STATUS = {
   missing: "text-red-300 border-red-500/40 bg-red-500/10",
@@ -98,7 +99,24 @@ export const DrainagePlan = ({ project, onChange }) => (
       </div>
     )}
   </ToolGate>
-  <DrainOverlay project={project} onChange={onChange} />
+  <LayoutLink project={project} />
   <DrainTakeoff project={project} refreshKey={project.pages.map((p) => `${p.drain_status}:${p.drain_overlay?.edited_at || ""}:${p.drain_overlay?.edited}`).join("|")} />
   </div>
 );
+
+const LayoutLink = ({ project }) => {
+  const nav = useNavigate();
+  const drawn = project.pages.filter((p) => p.drain_status === "ready" && p.drain_overlay?.is_foundation !== false);
+  return (
+    <div className="bg-[#111827] border border-cyan-500/30 rounded-xl p-5 flex flex-wrap items-center gap-4" data-testid="drain-layout-link-card">
+      <div className="h-11 w-11 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center"><Spline className="h-5 w-5 text-cyan-400" /></div>
+      <div className="mr-auto">
+        <p className="font-display font-semibold">Drain tile layout</p>
+        <p className="text-xs text-slate-400 mt-0.5">{drawn.length ? `Laid out on ${drawn.map((p) => p.sheet_number || `page ${p.index + 1}`).join(", ")}` : "Not drawn yet"} — full-screen editor: add, move or delete drain tile, cleanouts, sumps & pumps, discharge and slope arrows.</p>
+      </div>
+      <button data-testid="open-drain-layout-button" onClick={() => nav(`/drain/${project.id}`)} className="flex items-center gap-2 rounded-md bg-cyan-500 text-[#0B0F17] font-semibold px-4 py-2 text-sm hover:bg-cyan-400 active:scale-95 transition-[background-color,transform]">
+        Open layout editor <ArrowRight className="h-4 w-4" />
+      </button>
+    </div>
+  );
+};

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request, UploadFile, File, Form
+import math
 from fastapi.responses import Response, StreamingResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from dotenv import load_dotenv
@@ -671,34 +672,66 @@ class Discharge(BaseModel):
     label: str = ""
 
 
+class Slope(BaseModel):
+    x1: float = Field(allow_inf_nan=False)
+    y1: float = Field(allow_inf_nan=False)
+    x2: float = Field(allow_inf_nan=False)
+    y2: float = Field(allow_inf_nan=False)
+    label: str = Field("", max_length=30)
+
+
 class DrainEdit(BaseModel):
     sump: SumpPt | None = None
     sumps: list[SumpPt] | None = Field(None, max_length=50)
     cleanouts: list[Pt] | None = Field(None, max_length=100)
     discharge: Discharge | None = None
+    drain_tile: list[tuple[float, float]] | None = Field(None, max_length=500)
+    footprint: list[tuple[float, float]] | None = Field(None, max_length=500)
+    slope_arrows: list[Slope] | None = Field(None, max_length=50)
+    length_ft: float | None = Field(None, ge=0, le=100000, allow_inf_nan=False)
+    pipe_spec: str | None = Field(None, max_length=200)
     reset: bool = False
+
+
+EDIT_KEYS = ("sump", "cleanouts", "discharge", "sumps", "drain_tile", "footprint", "slope_arrows", "length_ft", "pipe_spec")
+
+
+def _px_len(points, w, h) -> float:
+    pts = [(p[0] * w / 1000, p[1] * h / 1000) for p in points or [] if isinstance(p, (list, tuple)) and len(p) >= 2]
+    return sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
 
 
 @api.put("/projects/{pid}/pages/{idx}/drain-overlay")
 async def edit_drain(pid: str, idx: int, body: DrainEdit):
     pg = await get_page(pid, idx)
-    if pg.get("drain_status") != "ready":
-        raise HTTPException(400, "Draw the drain tile layout first")
-    ov = pg["drain_overlay"]
-    if ov.get("is_foundation") is False:
-        raise HTTPException(400, "This sheet has no foundation layout")
-    original = ov.get("ai_original") or {k: ov.get(k) for k in ("sump", "cleanouts", "discharge", "sumps")}
+    blank = {"is_foundation": True, "footprint": [], "drain_tile": [], "sump": None, "sumps": [], "cleanouts": [],
+             "discharge": None, "slope_arrows": [], "pipe_spec": "4\" perforated pipe in washed stone", "length_ft": 0, "notes": ["Manual layout"]}
+    ov = pg.get("drain_overlay") if pg.get("drain_status") == "ready" else None
+    if body.reset and (ov is None or not ov.get("ai_original")):
+        raise HTTPException(400, "Nothing to restore — draw the layout first")
+    if ov is None or ov.get("is_foundation") is False:
+        ov = {**blank, "manual": True}
+    original = ov.get("ai_original") or {k: ov.get(k) for k in EDIT_KEYS}
+    original = {**{k: ov.get(k) for k in EDIT_KEYS if k not in original}, **original}
+    w, h = pg.get("img_w") or 1000, pg.get("img_h") or 1000
     if body.reset:
         ov = {**ov, **original, "sumps": original.get("sumps") or [], "edited": False}
     else:
         c = lambda v: round(max(0.0, min(1000.0, v)), 1)  # noqa: E731
+        cp = lambda pts: [[c(x), c(y)] for x, y in pts]  # noqa: E731
         merge = lambda old, p: {**(old or {}), "x": c(p.x), "y": c(p.y), **({"label": p.label} if p.label else {})}  # noqa: E731
         finite = lambda pts: all(v == v and abs(v) != float("inf") for pt in pts for v in pt)  # noqa: E731
         sump_fields = lambda s: {k: getattr(s, k).strip() if isinstance(getattr(s, k), str) else getattr(s, k)  # noqa: E731
                                  for k in ("type", "pump_hp", "pit_size", "notes") if k in s.model_fields_set}
+        fs = body.model_fields_set
+        for key in ("drain_tile", "footprint"):
+            if getattr(body, key) is not None and not finite(getattr(body, key)):
+                raise HTTPException(400, "Invalid coordinates")
+        if "ft_per_px" not in ov:
+            ov["ft_per_px"] = (float(ov.get("length_ft") or 0) / _px_len(ov.get("drain_tile"), w, h)) if _px_len(ov.get("drain_tile"), w, h) else 0
         upd = {}
-        if body.sump:
-            upd["sump"] = {**merge(ov.get("sump"), body.sump), **sump_fields(body.sump)}
+        if "sump" in fs:
+            upd["sump"] = {**merge(ov.get("sump"), body.sump), **sump_fields(body.sump)} if body.sump else None
         if body.sumps is not None:
             if not finite([s.outlet for s in body.sumps if s.outlet]):
                 raise HTTPException(400, "Invalid coordinates")
@@ -706,13 +739,27 @@ async def edit_drain(pid: str, idx: int, body: DrainEdit):
                             for s in body.sumps]
         if body.cleanouts is not None:
             upd["cleanouts"] = [merge({}, p) for p in body.cleanouts]
-        if body.discharge:
-            if any(v != v or abs(v) == float("inf") for pt in body.discharge.points for v in pt):
+        if "discharge" in fs:
+            if body.discharge and not finite(body.discharge.points):
                 raise HTTPException(400, "Invalid coordinates")
-            upd["discharge"] = {**(ov.get("discharge") or {}), "points": [[c(x), c(y)] for x, y in body.discharge.points],
-                                **{k: v for k, v in (("to", body.discharge.to), ("label", body.discharge.label)) if v}}
+            upd["discharge"] = {**(ov.get("discharge") or {}), "points": cp(body.discharge.points),
+                                **{k: v for k, v in (("to", body.discharge.to), ("label", body.discharge.label)) if v}} if body.discharge else None
+        if body.footprint is not None:
+            upd["footprint"] = cp(body.footprint)
+        if body.slope_arrows is not None:
+            upd["slope_arrows"] = [{"x1": c(s.x1), "y1": c(s.y1), "x2": c(s.x2), "y2": c(s.y2), "label": s.label} for s in body.slope_arrows]
+        if body.pipe_spec is not None:
+            upd["pipe_spec"] = body.pipe_spec.strip()
+        if body.drain_tile is not None:
+            upd["drain_tile"] = cp(body.drain_tile)
+            if ov["ft_per_px"]:
+                upd["length_ft"] = round(_px_len(upd["drain_tile"], w, h) * ov["ft_per_px"], 1)
+        if body.length_ft is not None:
+            upd["length_ft"] = round(body.length_ft, 1)
+            tile_px = _px_len(upd.get("drain_tile", ov.get("drain_tile")), w, h)
+            upd["ft_per_px"] = body.length_ft / tile_px if tile_px else 0
         ov = {**ov, **upd, "ai_original": original, "edited": True, "edited_at": now()}
-    await set_page(pid, idx, {"drain_overlay": ov})
+    await db.pages.update_one({"project_id": pid, "index": idx}, {"$set": {"drain_overlay": ov, "drain_status": "ready", "drain_error": None}})
     return ov
 
 

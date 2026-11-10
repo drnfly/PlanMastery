@@ -22,7 +22,7 @@ def derive(ov: dict, page: dict, drainage: dict | None) -> dict:
     w, h = page.get("img_w") or 1000, page.get("img_h") or 1000
     tile_lf = float(ov.get("length_ft") or 0)
     tile_px = _len(ov.get("drain_tile"), w, h)
-    ft_per_px = tile_lf / tile_px if tile_lf and tile_px else 0
+    ft_per_px = ov.get("ft_per_px") or (tile_lf / tile_px if tile_lf and tile_px else 0)
     foot = [f for f in ov.get("footprint") or [] if isinstance(f, (list, tuple)) and len(f) >= 2]
     if len(foot) > 1 and list(foot[0]) == list(foot[-1]):
         foot = foot[:-1]
@@ -31,8 +31,9 @@ def derive(ov: dict, page: dict, drainage: dict | None) -> dict:
     pump_lf = sum(_len([[s["x"], s["y"]], s["outlet"]], w, h) for s in ov.get("sumps") or [] if s.get("outlet")) * ft_per_px
     m = re.search(r'(\d+(?:\.\d+)?)\s*(?:"|in|inch)', ov.get("pipe_spec") or "")
     stone = re.search(r'(?<![/\d])(\d+)\s*(?:"|in)\s*(?:of\s*|min\.?\s*|deep\s*)?(?:washed\s*|clean\s*)?(?:stone|gravel|aggregate)', (ov.get("pipe_spec") or "").lower())
+    dis_pts = (ov.get("discharge") or {}).get("points") or []
     p = {**DEFAULTS, "tile_lf": round(tile_lf, 1), "wall_perimeter_lf": round(wall_lf, 1),
-         "discharge_lf": max(round(dis_lf, 1), 10.0), "pump_discharge_lf": round(pump_lf, 1)}
+         "discharge_lf": max(round(dis_lf, 1), 10.0) if len(dis_pts) > 1 else 0.0, "pump_discharge_lf": round(pump_lf, 1)}
     if m and 2 <= float(m.group(1)) <= 8:
         p["pipe_dia_in"] = float(m.group(1))
     if stone:

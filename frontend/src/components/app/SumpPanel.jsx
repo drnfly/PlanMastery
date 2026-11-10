@@ -20,7 +20,7 @@ const Field = ({ label, className = "", children }) => (
 );
 const inputCls = "mt-1 w-full bg-[#0B0F17] border border-slate-700 rounded-md px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-cyan-500";
 
-const SumpForm = ({ s, onPatch, onRemove, isMain }) => (
+export const SumpForm = ({ s, onPatch, onRemove, isMain }) => (
   <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end" data-testid="sump-form">
     <Field label="Label"><input data-testid="sump-field-label" className={inputCls} value={s.label || ""} maxLength={30} onChange={(e) => onPatch({ label: e.target.value })} /></Field>
     <Field label="Type">
