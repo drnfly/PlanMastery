@@ -263,6 +263,16 @@ def build_report(project: dict, pages: list, images: dict, brand: dict, logo: by
         flow += wp_section(extras["wp"])
     if extras.get("drain"):
         flow += wp_section(extras["drain"], "Drainage plan")
+    if extras.get("drain_takeoff"):
+        tk = extras["drain_takeoff"]
+        pr = tk["params"]
+        flow += [P("Drainage material takeoff", "h2"),
+                 P(f"From drain tile layout on {tk['sheet']} · {pr['tile_lf']:g} LF tile · waste {pr['waste_pct']:g}% · "
+                   f"stone trench {pr['trench_width_in']:g}\" x {pr['stone_depth_in']:g}\"", "meta"), Spacer(1, 6),
+                 simple_table(["Group", "Material", "Spec", "Qty", "Unit", "Notes"],
+                              [[ln["group"], ln["item"], ln["spec"], ln["qty"], ln["unit"], ln["notes"]] for ln in tk["lines"]],
+                              [0.8, 1.9, 1.7, 0.6, 0.45, 1.85], AMBER),
+                 Spacer(1, 4), P("Quantities include waste and are for ordering estimates — confirm on site.", "meta"), PageBreak()]
     for label, png, notes in extras.get("drain_images") or []:
         flow += [P(f"Drain tile layout — {label}", "h2"), sheet_image(png, 8.0)] + bullets(notes) + [PageBreak()]
 

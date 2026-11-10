@@ -26,6 +26,7 @@ from storage import init_storage, get_object, put_object, APP_NAME  # noqa: E402
 from processing import open_pdf, process_pdf_page, process_image  # noqa: E402
 from ai_engine import index_sheets, analyze_sheet, model_sheet, stream_chat, temp_file, pick_sheets  # noqa: E402
 from overlay import render_overlay  # noqa: E402
+from drain_takeoff import derive as derive_takeoff, compute as compute_takeoff, DEFAULTS as TAKEOFF_DEFAULTS  # noqa: E402
 from set_tools import drain_overlay  # noqa: E402
 from report import build_report  # noqa: E402
 from icf_calc import compute as icf_compute  # noqa: E402
@@ -423,6 +424,10 @@ async def report(pid: str, body: ReportIn):
         extras["icf"] = tools["icf"]["data"]
     if body.crew in ("full", "foundation", "waterproofing") and (tools.get("waterproofing") or {}).get("status") == "ready":
         extras["wp"] = tools["waterproofing"]["data"]
+    if body.crew in ("full", "foundation", "waterproofing"):
+        tk = await drain_takeoff_for(p, None)
+        if tk:
+            extras["drain_takeoff"] = tk[1]
     if body.crew in ("full", "foundation", "waterproofing") and (tools.get("drainage") or {}).get("status") == "ready":
         extras["drain"] = tools["drainage"]["data"]
         drawn = await db.pages.find({"project_id": pid, "drain_status": "ready"}, PAGE_LIST).sort("index", 1).to_list(20)
@@ -709,6 +714,46 @@ async def edit_drain(pid: str, idx: int, body: DrainEdit):
         ov = {**ov, **upd, "ai_original": original, "edited": True, "edited_at": now()}
     await set_page(pid, idx, {"drain_overlay": ov})
     return ov
+
+
+class TakeoffIn(BaseModel):
+    page_index: int
+    params: dict[str, float | None] = {}
+
+
+async def drain_takeoff_for(p: dict, idx: int | None) -> tuple[dict, dict] | None:
+    saved = (p.get("tools") or {}).get("drain_takeoff") or {}
+    idx = saved.get("page_index") if idx is None else idx
+    q = {"project_id": p["id"], "drain_status": "ready"}
+    pg = await db.pages.find_one({**q, "index": idx}, PAGE_LIST) if idx is not None else None
+    pg = pg or await db.pages.find_one(q, PAGE_LIST, sort=[("index", 1)])
+    if not pg or pg["drain_overlay"].get("is_foundation") is False:
+        return None
+    base = derive_takeoff(pg["drain_overlay"], pg, ((p.get("tools") or {}).get("drainage") or {}).get("data"))
+    params = {**base, **(saved.get("params") or {})} if saved.get("page_index") == pg["index"] else base
+    return pg, {**compute_takeoff(pg["drain_overlay"], params), "page_index": pg["index"], "sheet": sheet_label(pg),
+                "derived": base, "edited": saved.get("page_index") == pg["index"] and bool(saved.get("params"))}
+
+
+@api.get("/projects/{pid}/drain-takeoff")
+async def get_drain_takeoff(pid: str, page: int | None = None):
+    res = await drain_takeoff_for(await get_project(pid), page)
+    if not res:
+        raise HTTPException(404, "Draw the drain tile layout on the foundation sheet first")
+    return res[1]
+
+
+@api.put("/projects/{pid}/drain-takeoff")
+async def put_drain_takeoff(pid: str, body: TakeoffIn):
+    await get_project(pid)
+    clean = {k: v for k, v in body.params.items() if v is not None and k in TAKEOFF_DEFAULTS}
+    if any(v != v or abs(v) == float("inf") or v < 0 or v > 1e6 for v in clean.values()):
+        raise HTTPException(400, "Values must be between 0 and 1,000,000")
+    pg = await db.pages.find_one({"project_id": pid, "index": body.page_index, "drain_status": "ready"}, {"_id": 0, "index": 1, "drain_overlay.is_foundation": 1})
+    if not pg or (pg.get("drain_overlay") or {}).get("is_foundation") is False:
+        raise HTTPException(400, "That sheet has no drain tile layout")
+    await set_tool(pid, "drain_takeoff", {"status": "ready", "page_index": body.page_index, "params": clean, "updated_at": now()})
+    return (await drain_takeoff_for(await get_project(pid), body.page_index))[1]
 
 
 @api.get("/projects/{pid}/pages/{idx}/drain-overlay.png")
