@@ -15,15 +15,15 @@ const PARAMS = [
 const toCsv = (rows) => [["Group", "Material", "Spec", "Qty", "Unit", "Notes"], ...rows.map((r) => [r.group, r.item, r.spec, r.qty, r.unit, r.notes])]
   .map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
 
-export const DrainTakeoff = ({ project, refreshKey }) => {
+export const DrainTakeoff = ({ project, refreshKey, pageIndex }) => {
   const [data, setData] = useState(null);
   const [vals, setVals] = useState({});
   const [missing, setMissing] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(() => getDrainTakeoff(project.id)
+  const load = useCallback(() => getDrainTakeoff(project.id, pageIndex)
     .then((d) => { setData(d); setVals(d.params); setMissing(false); })
-    .catch((e) => { if (e.response?.status === 404) setMissing(true); else toast.error("Could not load takeoff"); }), [project.id]);
+    .catch((e) => { if (e.response?.status === 404) setMissing(true); else toast.error("Could not load takeoff"); }), [project.id, pageIndex]);
   useEffect(() => { load(); }, [load, refreshKey]);
 
   const save = async (params) => {

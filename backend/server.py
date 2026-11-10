@@ -716,6 +716,8 @@ async def edit_drain(pid: str, idx: int, body: DrainEdit):
     w, h = pg.get("img_w") or 1000, pg.get("img_h") or 1000
     if body.reset:
         ov = {**ov, **original, "sumps": original.get("sumps") or [], "edited": False}
+        tile_px = _px_len(original.get("drain_tile"), w, h)
+        ov["ft_per_px"] = float(original.get("length_ft") or 0) / tile_px if tile_px else 0
     else:
         c = lambda v: round(max(0.0, min(1000.0, v)), 1)  # noqa: E731
         cp = lambda pts: [[c(x), c(y)] for x, y in pts]  # noqa: E731
@@ -743,7 +745,7 @@ async def edit_drain(pid: str, idx: int, body: DrainEdit):
             if body.discharge and not finite(body.discharge.points):
                 raise HTTPException(400, "Invalid coordinates")
             upd["discharge"] = {**(ov.get("discharge") or {}), "points": cp(body.discharge.points),
-                                **{k: v for k, v in (("to", body.discharge.to), ("label", body.discharge.label)) if v}} if body.discharge else None
+                                **{k: getattr(body.discharge, k) for k in ("to", "label") if k in body.discharge.model_fields_set}} if body.discharge else None
         if body.footprint is not None:
             upd["footprint"] = cp(body.footprint)
         if body.slope_arrows is not None:
@@ -761,6 +763,13 @@ async def edit_drain(pid: str, idx: int, body: DrainEdit):
         ov = {**ov, **upd, "ai_original": original, "edited": True, "edited_at": now()}
     await db.pages.update_one({"project_id": pid, "index": idx}, {"$set": {"drain_overlay": ov, "drain_status": "ready", "drain_error": None}})
     return ov
+
+
+@api.delete("/projects/{pid}/pages/{idx}/drain-overlay")
+async def delete_drain(pid: str, idx: int):
+    await get_page(pid, idx)
+    await set_page(pid, idx, {"drain_status": "none", "drain_overlay": None, "drain_error": None})
+    return {"ok": True}
 
 
 class TakeoffIn(BaseModel):

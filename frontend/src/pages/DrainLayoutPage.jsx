@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, Download, Loader2, PenLine, Save, Undo2, Ruler, Wand2 } from "lucide-react";
-import { getProject, fetchPageImage, startDrainOverlay, editDrainOverlay, fetchDrainPng } from "@/lib/api";
+import { ArrowLeft, Download, Loader2, PenLine, Save, Undo2, Ruler, Wand2, Trash2 } from "lucide-react";
+import { getProject, fetchPageImage, startDrainOverlay, editDrainOverlay, fetchDrainPng, deleteDrainOverlay } from "@/lib/api";
 import { LayoutCanvas } from "@/components/drain/LayoutCanvas";
 import { ToolPalette } from "@/components/drain/ToolPalette";
 import { Inspector } from "@/components/drain/Inspector";
@@ -74,7 +74,17 @@ export default function DrainLayoutPage() {
     } catch (e) { const dd = e.response?.data?.detail; toast.error(typeof dd === "string" ? dd : "Could not save — check the values"); }
     finally { setSaving(false); }
   };
-  const resetAi = async () => { setSaving(true); try { await editDrainOverlay(pid, idx, { reset: true }); toast.success("Restored the original layout"); await load(); } finally { setSaving(false); } };
+  const resetAi = async () => {
+    setSaving(true);
+    try { await editDrainOverlay(pid, idx, { reset: true }); toast.success("Restored the original layout"); await load(); }
+    catch (e) { toast.error(e.response?.data?.detail || "Could not restore"); }
+    finally { setSaving(false); }
+  };
+  const removeLayout = async () => {
+    if (!window.confirm("Delete the drain tile layout on this sheet?")) return;
+    try { await deleteDrainOverlay(pid, idx); toast.success("Layout deleted"); setDraft(null); await load(); }
+    catch { toast.error("Could not delete"); }
+  };
   const download = async () => {
     try {
       const href = URL.createObjectURL(await fetchDrainPng(pid, idx));
@@ -95,8 +105,8 @@ export default function DrainLayoutPage() {
           <p className="font-mono text-[10px] text-slate-500 truncate">{project.name}</p>
         </div>
         <select data-testid="layout-sheet-select" value={idx} disabled={dirty} onChange={(e) => setIdx(Number(e.target.value))}
-          className="ml-auto bg-[#111827] border border-slate-700 rounded-md px-2 py-1.5 text-xs max-w-[220px] disabled:opacity-50">
-          {project.pages.map((p) => <option key={p.index} value={p.index}>{p.sheet_number ? `${p.sheet_number} · ` : ""}{p.title}{p.drain_status === "ready" ? " ✓" : ""}</option>)}
+          className="ml-auto bg-[#111827] border border-slate-700 rounded-md px-2 py-1.5 text-xs max-w-[150px] sm:max-w-[260px] disabled:opacity-50">
+          {project.pages.map((p) => <option key={p.index} value={p.index}>{p.sheet_number ? `${p.sheet_number} · ` : ""}{p.title}{p.drain_status === "ready" && p.drain_overlay?.is_foundation !== false ? " ✓" : ""}</option>)}
         </select>
         {saved?.edited && <span className="hidden md:inline font-mono text-[10px] text-amber-300 border border-amber-500/40 rounded px-1.5 py-0.5" data-testid="layout-edited-badge">FIELD-ADJUSTED</span>}
       </header>
@@ -112,7 +122,7 @@ export default function DrainLayoutPage() {
         {status === "generating" && <div className="bg-[#111827] border border-slate-800 rounded-xl p-6 flex items-center gap-3" data-testid="layout-generating"><Loader2 className="h-5 w-5 animate-spin text-cyan-400" /><p className="text-sm">AI is tracing the footing and laying out the drain tile…</p></div>}
 
         {draft && (
-          <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 space-y-3 sticky top-14 z-20" data-testid="layout-toolbar">
+          <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 space-y-3 md:sticky md:top-14 z-20" data-testid="layout-toolbar">
             <ToolPalette tool={tool} setTool={setTool} canDelete={!!sel} onDelete={del} canUndo={hist.length > 0} onUndo={undo}
               onClear={() => { if (window.confirm("Remove every item from this layout?")) { apply({ ...clone(BLANK), pipe_spec: draft.pipe_spec, length_ft: draft.length_ft }); setSel(null); } }} />
             <div className="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-3">
@@ -123,6 +133,7 @@ export default function DrainLayoutPage() {
               ))}
               <div className="ml-auto flex flex-wrap gap-2">
                 {saved?.ai_original && <button data-testid="layout-reset-ai" onClick={resetAi} disabled={saving} className="flex items-center gap-1.5 text-xs border border-slate-700 rounded-md px-3 py-1.5 hover:bg-slate-800"><Undo2 className="h-3.5 w-3.5" />Original layout</button>}
+                {saved && <button data-testid="layout-delete-layout" onClick={removeLayout} className="flex items-center gap-1.5 text-xs border border-red-500/40 text-red-300 rounded-md px-3 py-1.5 hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" />Delete layout</button>}
                 {saved && <button data-testid="layout-ai-redraw" onClick={() => window.confirm("Replace this layout with a fresh AI layout?") && aiDraw()} className="flex items-center gap-1.5 text-xs border border-slate-700 rounded-md px-3 py-1.5 hover:bg-slate-800"><Wand2 className="h-3.5 w-3.5" />Redraw with AI</button>}
                 <button data-testid="layout-download" onClick={download} disabled={!saved || dirty} title={dirty ? "Save first" : ""} className="flex items-center gap-1.5 text-xs border border-cyan-500/60 text-cyan-300 rounded-md px-3 py-1.5 hover:bg-cyan-500/10 disabled:opacity-40"><Download className="h-3.5 w-3.5" />PNG for crew</button>
                 <button data-testid="layout-cancel" onClick={() => { setDraft(saved ? clone(saved) : null); setHist([]); setSel(null); }} disabled={!dirty || saving} className="text-xs border border-slate-700 rounded-md px-3 py-1.5 hover:bg-slate-800 disabled:opacity-40">Discard</button>
@@ -155,7 +166,7 @@ export default function DrainLayoutPage() {
             </div>
           )}
         </div>
-        {saved && <DrainTakeoff project={project} refreshKey={refreshKey} />}
+        {saved && <DrainTakeoff project={project} refreshKey={refreshKey} pageIndex={idx} />}
       </main>
     </div>
   );

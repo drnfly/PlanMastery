@@ -28,14 +28,15 @@ export default function Workspace() {
   const [pageIdx, setPageIdx] = useState(0);
   const [tick, setTick] = useState(0);
   const [view, setView] = useState(params.get("tab") || "sheets");
-  const firstLoad = useRef(true);
+  const prevId = useRef(activeId);
 
   const refreshList = useCallback(() => listProjects().then(setProjects).catch(() => toast.error("Could not load projects")), []);
   const poke = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => { refreshList(); }, [refreshList]);
   useEffect(() => {
-    if (firstLoad.current) { firstLoad.current = false; return; }
+    if (prevId.current === activeId) return;
+    prevId.current = activeId;
     setPageIdx(0); setView("sheets");
   }, [activeId]);
 

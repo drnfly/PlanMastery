@@ -1,0 +1,49 @@
+{
+  "summary": "Tested the new /drain/:pid Drain Layout page end to end, plus the PUT drain-overlay backend. Backend: 20 of 21 new tests pass, and the old suites test_iter7/8/9 pass (45/45 with -n 0). These pass: tile edits recomputing length_ft, length_ft recalibration, sump:null/discharge:null, adding items, clamping, NaN/Infinity rejection, PNG, manual layout on a sheet with no layout, and reset returning 400 on a sheet with no layout. One test fails: reset does not restore ft_per_px. Frontend: these work: the link card, navigation, back to ?tab=drainage (after my StrictMode fix), auto-picking the sheet, the sheet select being disabled while unsaved, midpoint insert+drag, dragging cleanouts, the main sump (discharge start follows), sump outlets, slope body and ends, and tile vertices. All 7 add tools work, as do delete (Delete key, toolbar button, inspector), undo, Clear all and Redraw confirm dialogs, Discard, Save (toast, FIELD-ADJUSTED badge, takeoff refresh, PNG download drain_tile_S-201.png), Original layout reset, and the manual start flow (tile tool turns on automatically, save creates a ready layout). Problems: in add modes, clicks that land on an existing handle are swallowed, and the mobile requirements are not implemented.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/projects/{pid}/pages/{idx}/drain-overlay {reset:true}", "issue": "Reset restores length_ft and geometry but keeps the recalibrated ft_per_px. Steps: PUT {length_ft:280}, then PUT {reset:true}, then PUT drain_tile=<original loop>. Result: length_ft=280 instead of 140. After a reset, any later tile edit gives the wrong LF. Fix: on reset, recompute ov['ft_per_px'] = original.length_ft / _px_len(original.drain_tile), or store ft_per_px in ai_original."},
+      {"endpoint": "PUT drain-overlay discharge", "issue": "discharge.to/label are merged only when truthy ({k:v ... if v}), so clearing the label to '' keeps the old one on the server."},
+      {"endpoint": "PUT drain-overlay (manual)", "issue": "There is no API to delete or undo a manual layout on a sheet (the sheet stays drain_status=ready). Page 1 test data had to be restored directly in Mongo."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "LayoutCanvas grab() in add modes", "issue": "When the tool is not 'select', a pointerdown on an existing handle (tile/foot vertex, cleanout, sump, dpt, slope) calls stopPropagation and returns, so svg 'down' never adds the item. Effects: (1) you cannot drop a cleanout or sump on a tile corner, which is where cleanouts and sumps usually go. Every AI tile corner already has a CO or sump on it. (2) In a manual layout you cannot close the tile loop by clicking the first point again. Reproduced on page 1: 5 tile clicks gave 4 points; a cleanout at (200,200) and a sump at (800,800) on vertices were both ignored. Fix: in grab(), if tool !== 'select', return without stopPropagation/preventDefault (or call onAdd).", "selector": "[data-testid=layout-svg]", "priority": "HIGH"},
+      {"component": "Mobile 390px toolbar", "issue": "Not implemented as specified. layout-toolbar has 'sticky top-14' with no breakpoint, so it is sticky on mobile and covers about 420 of 844px while scrolling. Every tool button still shows its full text label ('+ Drain tile', '+ Cleanout'...) instead of icons only. Fix: 'md:sticky md:top-14' and wrap the labels in <span className={tool===k ? '' : 'hidden sm:inline'}>. The stage does scroll horizontally (scrollWidth 860 vs 356), which is OK.", "selector": "[data-testid=layout-toolbar], [data-testid^=layout-tool-]", "priority": "MEDIUM"},
+      {"component": "Overlapping handles on AI layout", "issue": "Closed-loop tile vertices v-0 and v-4 sit on the same point, and every tile corner is covered by a cleanout or the sump, which renders on top. You can't grab a tile corner, and dragging v-0 doesn't move v-4, so the loop opens. Consider moving the closing vertex together with the first one, and/or rendering tile vertices above cleanouts while the tile layer is the focus.", "selector": "[data-testid=layout-tile-v-0]", "priority": "MEDIUM"},
+      {"component": "Add tile/footprint on a closed loop", "issue": "Adding a tile point or footing corner appends after the closing point, so on an AI loop you get a stray diagonal leg from the start corner. Consider inserting before the closing point when the loop is closed.", "selector": "[data-testid=layout-tool-tile]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Workspace ?project=&tab=drainage (Back button)", "issue": "FIXED BY TESTER. The firstLoad ref guard in Workspace.jsx broke under React.StrictMode: the effect runs twice, so setView('sheets') wiped tab=drainage and the Back button landed on the Sheets tab. I replaced it with a prevId ref comparison. Back now opens the Drainage tab.", "affected_selectors": ["layout-back-button", "drain-layout-link-card"]},
+      {"flow": "Takeoff on the layout page for a non-default sheet", "issue": "After saving a manual layout on A-101 (page 1), the DrainTakeoff panel on the page still said 'From S-201 FOUNDATION PLAN layout'. It follows the project's saved page_index, not the sheet being edited, which is confusing.", "affected_selectors": ["drain-takeoff"]}
+    ],
+    "design_issues": [
+      {"screen": "DrainLayoutPage mobile header", "issues": ["The title truncates to 'Drain ...' because the sheet select takes up to 220px. Consider making the select narrower on mobile."]},
+      {"screen": "Sheet select", "issues": ["Shows ✓ on non-foundation sheets (A-000 has drain_status ready with is_foundation=false)."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter10_drain_layout.py", "/app/backend/tests/snapshot_iter10.py", "/app/test_reports/pytest/pytest_iter10.xml"],
+  "action_items": [
+    "LayoutCanvas grab(): in add modes, let the click reach the svg 'down' handler, or call onAdd, so items can be added on top of existing handles and the tile loop can be closed",
+    "Implement the mobile spec: toolbar not sticky below md, tool buttons icon-only except the active one",
+    "Backend reset: restore/recompute ft_per_px from ai_original",
+    "Optional: keep the closing tile vertex in sync with v-0 when dragging; render tile vertices above cleanouts/sump, or offset them",
+    "Optional: show the takeoff for the current sheet on the layout page; add a way to delete a manual layout; allow clearing discharge label/to"
+  ],
+  "critical_code_review_comments": [
+    "LayoutCanvas grab(): stopPropagation happens before the tool check, which causes the add-mode bug above",
+    "grab() calls onBegin() (pushes history) on every pointerdown, even with no movement, so Undo has no-op steps",
+    "Deleting a selected 'xoutlet' removes the whole extra sump. Consider clearing just the outlet",
+    "resetAi() has no catch, so an error gives an unhandled rejection and no toast",
+    "The Backspace key deletes the selection whenever focus isn't in an input, e.g. after clicking a toolbar button. That's acceptable, but there is no confirm for the main sump",
+    "The draft length_ft does not update live while reshaping. It only refreshes after save; expected per the hint text, but worth noting"
+  ],
+  "updated_files": ["/app/frontend/src/pages/Workspace.jsx (StrictMode-safe prevId ref instead of firstLoad)", "/app/backend/tests/test_iter10_drain_layout.py", "/app/backend/tests/snapshot_iter10.py"],
+  "success_rate": {"backend": "95% (20/21 new; 45/45 regression)", "frontend": "85%"},
+  "seed_data_creation": "No new projects. I edited TEST_Iter4 pages 1 and 2 during the tests, then restored both from a Mongo snapshot taken before testing: page 1 is drain_status none with overlay null; page 2 is the original 140 LF layout with ft_per_px 0.02190. I did not touch Smith Residence or the user projects.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run with -n 0. test_iter10 resets page 2 at teardown but does NOT restore page 1 (it leaves a manual layout) and, because of the ft_per_px bug, leaves page 2's ft_per_px stale. Before testing: cd /app/backend && python tests/snapshot_iter10.py save, then cp /tmp/iter10_snapshot.json somewhere safe. Afterwards run restore1 and restore2 (they read /tmp/iter10_snapshot.json). In Playwright, grab handles by their inner rect/circle, not the <g> centre: label text widens the group bbox and has pointer-events none, so the click falls through. The app runs under React.StrictMode."
+}

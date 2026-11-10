@@ -18,11 +18,10 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
     return [clamp(r.x), clamp(r.y / aspect)];
   };
   const grab = (s) => (e) => {
-    e.stopPropagation(); e.preventDefault();
     if (tool !== "select") return;
+    e.stopPropagation(); e.preventDefault();
     const [x, y] = toPt(e);
-    onBegin();
-    drag.current = { s, start: { x, y, orig: s.kind === "slope" ? { ...d.slope_arrows[s.i] } : null } };
+    drag.current = { s, pushed: false, start: { x, y, orig: s.kind === "slope" ? { ...d.slope_arrows[s.i] } : null } };
     setSel(s);
     svgRef.current.setPointerCapture(e.pointerId);
   };
@@ -31,7 +30,12 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
     const [x, y] = toPt(e);
     onAdd(tool, Math.round(x * 10) / 10, Math.round(y * 10) / 10);
   };
-  const move = (e) => { if (drag.current) { const [x, y] = toPt(e); onMove(drag.current.s, x, y, drag.current.start); } };
+  const move = (e) => {
+    if (!drag.current) return;
+    if (!drag.current.pushed) { onBegin(); drag.current.pushed = true; }
+    const [x, y] = toPt(e);
+    onMove(drag.current.s, x, y, drag.current.start);
+  };
   const end = () => { drag.current = null; };
   const is = (k, i, v) => sel?.kind === k && (i === undefined || sel.i === i) && (v === undefined || sel.v === v);
   const h = { style: { cursor: tool === "select" ? "grab" : "crosshair", touchAction: "none" } };
@@ -51,7 +55,7 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
           e.stopPropagation(); e.preventDefault(); onBegin();
           const s = { kind: key === "drain_tile" ? "tile" : "foot", v: v + 1 };
           setDraft(insertVertex(d, key, v, mx, my)); setSel(s);
-          drag.current = { s, start: null };
+          drag.current = { s, pushed: true, start: null };
           svgRef.current.setPointerCapture(e.pointerId);
         }}>
         <circle cx={mx} cy={sy(my)} r="7" fill={`${color}55`} stroke="#fff" strokeWidth="1.5" />

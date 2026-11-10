@@ -3,7 +3,7 @@ import { TOOLS } from "@/components/drain/geometry";
 
 const ICONS = { select: MousePointer2, tile: Spline, cleanout: CircleDot, sump: Square, discharge: MoveUpRight, slope: ArrowUpRight, footprint: Pentagon };
 const HINT = {
-  select: "Drag any item or point to move it. Tap + on a line to add a bend. Select an item, then Delete.",
+  select: "Drag any item or point to move it. Tap + on a line to add a bend. Select an item, then Delete. Hide a layer to reach points underneath.",
   tile: "Tap the sheet to add drain tile points in order around the footing.",
   cleanout: "Tap the sheet to drop a cleanout.",
   sump: "Tap the sheet to place a sump / pump. The first one becomes the main sump.",
@@ -19,8 +19,8 @@ export const ToolPalette = ({ tool, setTool, canDelete, onDelete, canUndo, onUnd
         const Icon = ICONS[k];
         return (
           <button key={k} data-testid={`layout-tool-${k}`} onClick={() => setTool(k)} title={l}
-            className={`flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${tool === k ? "border-cyan-400 bg-cyan-500 text-[#0B0F17]" : "border-slate-700 text-slate-300 hover:bg-slate-800"}`}>
-            <Icon className="h-3.5 w-3.5" />{k === "select" ? l : `+ ${l}`}
+            className={`flex items-center gap-1.5 rounded-md border px-2.5 sm:px-3 py-2 text-xs font-medium transition-colors ${tool === k ? "border-cyan-400 bg-cyan-500 text-[#0B0F17]" : "border-slate-700 text-slate-300 hover:bg-slate-800"}`}>
+            <Icon className="h-3.5 w-3.5" /><span className={tool === k ? "" : "hidden sm:inline"}>{k === "select" ? l : `+ ${l}`}</span>
           </button>
         );
       })}

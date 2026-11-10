@@ -16,10 +16,13 @@ export const TOOLS = [
   ["discharge", "Discharge"], ["slope", "Slope arrow"], ["footprint", "Footing outline"],
 ];
 
+const closed = (a) => a?.length > 2 && a[0][0] === a.at(-1)[0] && a[0][1] === a.at(-1)[1];
+const appendPt = (a, p) => (closed(a) ? [...a.slice(0, -1), p, a.at(-1)] : [...(a || []), p]);
+
 export function addAt(d, tool, x, y) {
   const o = clone(d);
-  if (tool === "tile") { o.drain_tile = [...(o.drain_tile || []), [x, y]]; return [o, { kind: "tile", v: o.drain_tile.length - 1 }]; }
-  if (tool === "footprint") { o.footprint = [...(o.footprint || []), [x, y]]; return [o, { kind: "foot", v: o.footprint.length - 1 }]; }
+  if (tool === "tile") { o.drain_tile = appendPt(o.drain_tile, [x, y]); return [o, { kind: "tile", v: closed(o.drain_tile) ? o.drain_tile.length - 2 : o.drain_tile.length - 1 }]; }
+  if (tool === "footprint") { o.footprint = appendPt(o.footprint, [x, y]); return [o, { kind: "foot", v: closed(o.footprint) ? o.footprint.length - 2 : o.footprint.length - 1 }]; }
   if (tool === "cleanout") {
     o.cleanouts = [...(o.cleanouts || []), { x, y, label: nextLabel(o.cleanouts || [], "CO") }];
     return [o, { kind: "cleanout", i: o.cleanouts.length - 1 }];
@@ -46,7 +49,12 @@ export function addAt(d, tool, x, y) {
 
 export function moveSel(d, s, x, y, start) {
   const o = clone(d);
-  const setPt = (arr, v) => { arr[v] = [x, y]; };
+  const setPt = (arr, v) => {
+    const wasClosed = closed(arr);
+    arr[v] = [x, y];
+    if (wasClosed && v === 0) arr[arr.length - 1] = [x, y];
+    if (wasClosed && v === arr.length - 1) arr[0] = [x, y];
+  };
   switch (s.kind) {
     case "tile": setPt(o.drain_tile, s.v); break;
     case "foot": setPt(o.footprint, s.v); break;
@@ -81,7 +89,8 @@ export function removeSel(d, s) {
     case "foot": o.footprint = drop(o.footprint, s.v); break;
     case "dpt": o.discharge = o.discharge.points.length <= 2 ? null : { ...o.discharge, points: drop(o.discharge.points, s.v) }; break;
     case "cleanout": o.cleanouts = drop(o.cleanouts, s.i); break;
-    case "xsump": case "xoutlet": o.sumps = drop(o.sumps, s.i); break;
+    case "xsump": o.sumps = drop(o.sumps, s.i); break;
+    case "xoutlet": o.sumps[s.i].outlet = null; break;
     case "sump": o.sump = null; break;
     case "slope": o.slope_arrows = drop(o.slope_arrows, s.i); break;
     default: break;
