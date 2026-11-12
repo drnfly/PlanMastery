@@ -1,0 +1,33 @@
+{
+  "summary": "Frontend-only test of Snap And Measure on /drain/21f16323... (TEST_Iter4, S-201) at 1920px and 390px. Working: segment length labels (40'-1\"/29'-11\"/40'-1\"/29'-11\", which add up to 140'-0\"); layout-live-length 'Drain tile: 140.0 LF (140'-0\")'; amber highlight on the selected vertex's two segments; for closed-loop v0, segments 0 and 3 highlight; labels and total update live while dragging (143.4 LF mid-drag); snap indicator shows while dragging near a footing corner and v1 lands exactly on (752,172); no snap with the toggle off (landed at 756,829); adding a tile point near a footing corner snaps to (752,825); adding a cleanout near a tile corner snaps to (157,840); a new sump snaps to x=752 and a discharge point to (172,825); dragging a cleanout snaps to tile corner (767,157) and dragging a sump snaps to footing corner (172,172); a footing vertex does not snap to itself or to tile corners; the Lengths toggle hides and shows the labels; a manual layout with no scale shows the 'Enter the measured tile length' message, and labels appear after typing a length; Save works (server length_ft=138.4, matches live); Discard restores the original; on mobile there is no page overflow and the canvas scrolls inside its container. Found 1 spec violation (labels cover midpoint + handles on vertical segments) and 2 logic and UX bugs. Pages 1 and 2 restored with snapshot_iter10.py and checked identical to the pre-test snapshot.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "LayoutCanvas Measures", "issue": "On vertical segments the length label covers the midpoint + handle. Spec says it must not. Seg 1 label box is x 1005-1084, y 615-640; mid-1 circle is x 1061-1079, y 619-637, fully covered. Same for seg 3 / mid-3. Cause: the label is moved 22 units along the normal, but the rect half-width is about 34-40 units (t.length*8+12)/2, so on vertical lines it still sits over the midpoint. It also overlaps the footing-outline mid handles on S-201. Horizontal segments are fine. Diagonal segments partly overlap.", "selector": "[data-testid=layout-seg-len-1], [data-testid=layout-drain_tile-mid-1]", "priority": "HIGH"},
+      {"component": "LayoutCanvas snap indicator on add", "issue": "When adding a point/cleanout/sump/discharge, the snap does happen, but layout-snap-indicator is never really visible: pointerup -> end() calls setHit(null) right away, so the 600ms setTimeout never matters. The stale 600ms timeout from an add can also clear the indicator during a drag started within 600ms (seen: a cleanout drag snapped correctly but the indicator count was 0).", "selector": "[data-testid=layout-snap-indicator]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Manual layout: type length, then reshape", "issue": "ftPerUnit recalculates k from the current draft tile length on every render while draft._length_set is true. So after typing 90 LF, dragging vertex 2 from y=600 to y=800 kept the total at 90.0 LF and just rescaled the segments (58'-8\"/31'-4\" became 50'-0\"/40'-0\"). The saved length_ft stayed 90. The scale should be calibrated once, when the length is typed (store k / ft_per_unit then), and not re-derived from the changing geometry. Same issue on S-201 if the user types a length and then drags.", "affected_selectors": ["[data-testid=layout-length-input]", "[data-testid=layout-live-length]", "[data-testid^=layout-seg-len-]"]}
+    ],
+    "design_issues": [
+      {"screen": "Drain layout S-201", "issues": ["Length labels sit inside the loop on top of the dashed footing line and the footing mid handles, which looks cluttered. Placing them outside the loop (flip the normal), or using a smaller offset plus a minimum clearance from the midpoint, would read better."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Move segment labels so they never cover layout-drain_tile-mid-{v}: offset by at least the rect half-extent along the normal (e.g. offset = 11 + |nx|*w/2 + 10), or put labels on the outer side of the loop",
+    "Freeze the scale when the user types a length: save ft-per-unit at input time (e.g. draft._k), so later drags change the total and segment lengths",
+    "Keep the snap indicator visible after an add: don't clear hit in end() for adds, or clear the old timeout with a ref; also cancel any pending add timeout when a drag starts"
+  ],
+  "critical_code_review_comments": [
+    "geometry.ftPerUnit: the draft._length_set branch divides by svgLen(draft.drain_tile), so the total is always forced to length_ft (see integration issue)",
+    "LayoutCanvas.down: setTimeout(() => setHit(null), 600) is never cleared and runs into the next drag's hit state",
+    "addAt on a closed loop inserts the new tile point before the closing point, so the loop gets a new long closing segment (seen: 198 LF after one click). This existed before, but users should know about it now that lengths are shown"
+  ],
+  "updated_files": ["/app/test_reports/iteration_11.json"],
+  "success_rate": {"backend": "N/A (skipped as requested)", "frontend": "~88% (15/17 checks passed; label/midpoint overlap and post-calibration drag failed)"},
+  "seed_data_creation": "None kept. Saved test edits to TEST_Iter4 pages 2 and 1 during testing, then restored both with snapshot_iter10.py restore1/restore2; checked identical to the pre-test snapshot (backup at /app/test_reports/iter11_snapshot_backup.json). Smith Residence and real projects not touched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "S-201 geometry: tile [[157,157],[767,157],[767,840],[157,840],closed], footing inset 15 units (corners 172/752, 172/825), so with the default tolerance of 14 the tile vertices do not snap on their own. Cleanouts sit on tile corners and the sump on (767,840); hide them to grab tile vertices. Map SVG to screen coords with svg.getScreenCTM(), y*aspect where aspect = viewBox.height/1000. Run snapshot_iter10.py save first; restore1 and restore2 afterwards. After saving page 1, pickFoundation defaults to page 1 until it is restored."
+}

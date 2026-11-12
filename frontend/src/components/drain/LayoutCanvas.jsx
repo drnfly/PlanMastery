@@ -11,16 +11,20 @@ const ADD_KINDS = { tile: "tile", footprint: "foot", cleanout: "cleanout", sump:
 const Measures = ({ d, k, aspect, active }) => {
   const a = d.drain_tile || [];
   if (!k || a.length < 2) return null;
+  const cx = a.reduce((s, p) => s + p[0], 0) / a.length, cy = (a.reduce((s, p) => s + p[1], 0) / a.length) * aspect;
   return a.slice(1).map((q, i) => {
     const p = a[i];
     const dx = q[0] - p[0], dy = (q[1] - p[1]) * aspect;
     const len = Math.hypot(dx, dy);
     if (len < 8) return null;
     const hot = active.includes(i);
-    const nx = -dy / len, ny = dx / len;
-    const mx = (p[0] + q[0]) / 2 + nx * 22, my = ((p[1] + q[1]) / 2) * aspect + ny * 22;
     const t = fmtFt(len * k);
     const w = t.length * 8 + 12;
+    const midX = (p[0] + q[0]) / 2, midY = ((p[1] + q[1]) / 2) * aspect;
+    let nx = -dy / len, ny = dx / len;
+    if (a.length > 2 && (midX - cx) * nx + (midY - cy) * ny < 0) { nx = -nx; ny = -ny; }
+    const off = 14 + Math.abs(nx) * (w / 2) + Math.abs(ny) * 11;
+    const mx = midX + nx * off, my = midY + ny * off;
     return (
       <g key={`m-${i}`} data-testid={`layout-seg-len-${i}`} style={{ pointerEvents: "none" }}>
         <rect x={mx - w / 2} y={my - 11} width={w} height="22" rx="5" fill={hot ? "#F59E0B" : "#0B0F17"} opacity={hot ? 1 : 0.82} />
@@ -43,7 +47,9 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
     const r = p.matrixTransform(svg.getScreenCTM().inverse());
     return [clamp(r.x), clamp(r.y / aspect)];
   };
+  const hitTimer = useRef(null);
   const snapped = (kind, x, y, self) => {
+    clearTimeout(hitTimer.current);
     if (!snap || !kind) { setHit(null); return [x, y]; }
     const [sx, sy_, h] = snapPoint(d, kind, x, y, aspect, self);
     setHit(h);
@@ -52,6 +58,7 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
   const grab = (s) => (e) => {
     if (tool !== "select") return;
     e.stopPropagation(); e.preventDefault();
+    clearTimeout(hitTimer.current); setHit(null);
     const [x, y] = toPt(e);
     drag.current = { s, pushed: false, start: { x, y, orig: s.kind === "slope" ? { ...d.slope_arrows[s.i] } : null } };
     setSel(s);
@@ -61,7 +68,7 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
     if (tool === "select") { setSel(null); return; }
     const [x0, y0] = toPt(e);
     const [x, y] = snapped(ADD_KINDS[tool], x0, y0);
-    setTimeout(() => setHit(null), 600);
+    hitTimer.current = setTimeout(() => setHit(null), 900);
     onAdd(tool, Math.round(x * 10) / 10, Math.round(y * 10) / 10);
   };
   const move = (e) => {
@@ -73,7 +80,7 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
     const [x, y] = snapped(SNAP_KINDS[s.kind], x0, y0, self);
     onMove(s, x, y, drag.current.start);
   };
-  const end = () => { drag.current = null; setHit(null); };
+  const end = () => { if (drag.current) setHit(null); drag.current = null; };
   const n = (d.drain_tile || []).length;
   const isClosed = n > 2 && d.drain_tile[0][0] === d.drain_tile[n - 1][0] && d.drain_tile[0][1] === d.drain_tile[n - 1][1];
   const activeSegs = sel?.kind === "tile" ? [sel.v - 1, sel.v, ...(isClosed && (sel.v === 0 || sel.v === n - 1) ? [0, n - 2] : [])].filter((i) => i >= 0 && i < n - 1) : [];

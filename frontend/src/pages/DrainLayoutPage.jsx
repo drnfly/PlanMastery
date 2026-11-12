@@ -7,7 +7,7 @@ import { LayoutCanvas } from "@/components/drain/LayoutCanvas";
 import { ToolPalette } from "@/components/drain/ToolPalette";
 import { Inspector } from "@/components/drain/Inspector";
 import { DrainTakeoff } from "@/components/app/DrainTakeoff";
-import { addAt, moveSel, removeSel, clone, toBody, ftPerUnit, tileFt, fmtFt } from "@/components/drain/geometry";
+import { addAt, moveSel, removeSel, clone, toBody, ftPerUnit, tileFt, fmtFt, svgLen } from "@/components/drain/geometry";
 
 const LAYERS = [["tile", "Drain tile"], ["measure", "Lengths"], ["foot", "Footing outline"], ["cleanouts", "Cleanouts"], ["sump", "Sumps & discharge"], ["slope", "Slope arrows"]];
 const BLANK = { is_foundation: true, footprint: [], drain_tile: [], sump: null, sumps: [], cleanouts: [], discharge: null, slope_arrows: [], pipe_spec: "4\" perforated pipe in washed stone", length_ft: 0 };
@@ -55,7 +55,13 @@ export default function DrainLayoutPage() {
 
   const begin = useCallback(() => setHist((h) => [...h.slice(-40), draft]), [draft]);
   const apply = (next) => { begin(); setDraft(next); };
-  const patch = (fn) => { const o = clone(draft); fn(o); o._length_set = draft._length_set || o._length_set; apply(o); };
+  const patch = (fn) => {
+    const o = clone(draft); fn(o);
+    if (o._length_set && o.length_ft !== draft.length_ft) { const L = svgLen(o.drain_tile, aspect); o._k = L ? Number(o.length_ft || 0) / L : 0; }
+    o._length_set = draft._length_set || o._length_set;
+    if (o._k == null && draft._k != null) o._k = draft._k;
+    apply(o);
+  };
   const del = useCallback(() => { if (sel && draft) { setHist((h) => [...h.slice(-40), draft]); setDraft(removeSel(draft, sel)); setSel(null); } }, [sel, draft]);
   const undo = () => { if (hist.length) { setDraft(hist.at(-1)); setHist(hist.slice(0, -1)); setSel(null); } };
   useEffect(() => {
@@ -70,7 +76,7 @@ export default function DrainLayoutPage() {
     setSaving(true);
     try {
       const body = toBody(draft);
-      if (draft._length_set) body.length_ft = Number(draft.length_ft) || 0;
+      if (draft._length_set) body.length_ft = Math.round((k ? tileFt(draft, k, aspect) : Number(draft.length_ft) || 0) * 10) / 10;
       await editDrainOverlay(pid, idx, body);
       toast.success("Drain tile layout saved", { position: "top-center" });
       await load();

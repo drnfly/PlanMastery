@@ -17,12 +17,23 @@ export const TOOLS = [
 ];
 
 const closed = (a) => a?.length > 2 && a[0][0] === a.at(-1)[0] && a[0][1] === a.at(-1)[1];
-const appendPt = (a, p) => (closed(a) ? [...a.slice(0, -1), p, a.at(-1)] : [...(a || []), p]);
+const segDist = (p, a, b) => {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+};
+const appendPt = (a, p) => {
+  if (!closed(a)) return [...(a || []), p];
+  let best = 0;
+  a.slice(1).forEach((q, i) => { if (segDist(p, a[i], q) < segDist(p, a[best], a[best + 1])) best = i; });
+  return [...a.slice(0, best + 1), p, ...a.slice(best + 1)];
+};
+const addedIdx = (before, after) => after.findIndex((p, i) => !before[i] || p[0] !== before[i][0] || p[1] !== before[i][1]);
 
 export function addAt(d, tool, x, y) {
   const o = clone(d);
-  if (tool === "tile") { o.drain_tile = appendPt(o.drain_tile, [x, y]); return [o, { kind: "tile", v: closed(o.drain_tile) ? o.drain_tile.length - 2 : o.drain_tile.length - 1 }]; }
-  if (tool === "footprint") { o.footprint = appendPt(o.footprint, [x, y]); return [o, { kind: "foot", v: closed(o.footprint) ? o.footprint.length - 2 : o.footprint.length - 1 }]; }
+  if (tool === "tile") { const b = o.drain_tile || []; o.drain_tile = appendPt(b, [x, y]); return [o, { kind: "tile", v: addedIdx(b, o.drain_tile) }]; }
+  if (tool === "footprint") { const b = o.footprint || []; o.footprint = appendPt(b, [x, y]); return [o, { kind: "foot", v: addedIdx(b, o.footprint) }]; }
   if (tool === "cleanout") {
     o.cleanouts = [...(o.cleanouts || []), { x, y, label: nextLabel(o.cleanouts || [], "CO") }];
     return [o, { kind: "cleanout", i: o.cleanouts.length - 1 }];
@@ -115,11 +126,11 @@ export const toBody = (d) => ({
   pipe_spec: d.pipe_spec || "",
 });
 
-const svgLen = (a, aspect) => (a || []).slice(1).reduce((s, p, i) => s + Math.hypot(p[0] - a[i][0], (p[1] - a[i][1]) * aspect), 0);
+export const svgLen = (a, aspect) => (a || []).slice(1).reduce((s, p, i) => s + Math.hypot(p[0] - a[i][0], (p[1] - a[i][1]) * aspect), 0);
 
-// Feet per SVG unit (x 0-1000, y scaled by aspect)
+// Feet per SVG unit (x 0-1000, y scaled by aspect); a typed length freezes the scale in draft._k
 export function ftPerUnit(saved, draft, page, aspect) {
-  if (draft?._length_set && svgLen(draft.drain_tile, aspect)) return Number(draft.length_ft || 0) / svgLen(draft.drain_tile, aspect);
+  if (draft?._length_set && draft._k) return draft._k;
   if (saved?.ft_per_px && page?.img_w) return saved.ft_per_px * page.img_w / 1000;
   const L = svgLen(saved?.drain_tile, aspect);
   return L && saved?.length_ft ? Number(saved.length_ft) / L : 0;
