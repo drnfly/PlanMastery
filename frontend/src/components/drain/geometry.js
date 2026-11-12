@@ -114,3 +114,38 @@ export const toBody = (d) => ({
   slope_arrows: (d.slope_arrows || []).map((s) => ({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, label: s.label || "" })),
   pipe_spec: d.pipe_spec || "",
 });
+
+const svgLen = (a, aspect) => (a || []).slice(1).reduce((s, p, i) => s + Math.hypot(p[0] - a[i][0], (p[1] - a[i][1]) * aspect), 0);
+
+// Feet per SVG unit (x 0-1000, y scaled by aspect)
+export function ftPerUnit(saved, draft, page, aspect) {
+  if (draft?._length_set && svgLen(draft.drain_tile, aspect)) return Number(draft.length_ft || 0) / svgLen(draft.drain_tile, aspect);
+  if (saved?.ft_per_px && page?.img_w) return saved.ft_per_px * page.img_w / 1000;
+  const L = svgLen(saved?.drain_tile, aspect);
+  return L && saved?.length_ft ? Number(saved.length_ft) / L : 0;
+}
+
+export const tileFt = (d, k, aspect) => svgLen(d.drain_tile, aspect) * k;
+
+export const fmtFt = (f) => {
+  let ft = Math.floor(f);
+  let inch = Math.round((f - ft) * 12);
+  if (inch === 12) { ft += 1; inch = 0; }
+  return `${ft}'-${inch}"`;
+};
+
+const uniq = (a) => (closed(a) ? a.slice(0, -1) : a || []);
+
+// Snap to footing corners (and tile corners for fittings); returns [x, y, hitPoint|null]
+export function snapPoint(d, kind, x, y, aspect, self, tol = 14) {
+  const targets = [...uniq(d.footprint).map((p, v) => ({ p, src: "foot", v }))];
+  if (!["tile", "foot"].includes(kind)) targets.push(...uniq(d.drain_tile).map((p, v) => ({ p, src: "tile", v })));
+  let best = null;
+  let bd = tol;
+  for (const t of targets) {
+    if (self && t.src === self.src && (t.v === self.v || (closed(d[self.src === "foot" ? "footprint" : "drain_tile"]) && self.v === d[self.src === "foot" ? "footprint" : "drain_tile"].length - 1 && t.v === 0))) continue;
+    const dist = Math.hypot(t.p[0] - x, (t.p[1] - y) * aspect);
+    if (dist < bd) { bd = dist; best = t.p; }
+  }
+  return best ? [best[0], best[1], best] : [x, y, null];
+}

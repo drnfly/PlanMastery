@@ -1,13 +1,39 @@
-import { useRef } from "react";
-import { C, PUMPS, pts, clamp, insertVertex } from "@/components/drain/geometry";
+import { useRef, useState } from "react";
+import { C, PUMPS, pts, clamp, insertVertex, snapPoint, fmtFt } from "@/components/drain/geometry";
 
 const label = (x, y, color, text, dx = 14, dy = -8, size = 14) => (
   <text x={x + dx} y={y + dy} fill={color} fontSize={size} fontWeight="700" stroke="#fff" strokeWidth="3" paintOrder="stroke" style={{ pointerEvents: "none" }}>{text}</text>
 );
 
-export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, onBegin, setDraft, url }) => {
+const SNAP_KINDS = { tile: "tile", foot: "foot", cleanout: "cleanout", sump: "sump", xsump: "sump", xoutlet: "sump", outlet: "sump", dpt: "sump" };
+const ADD_KINDS = { tile: "tile", footprint: "foot", cleanout: "cleanout", sump: "sump", discharge: "sump" };
+
+const Measures = ({ d, k, aspect, active }) => {
+  const a = d.drain_tile || [];
+  if (!k || a.length < 2) return null;
+  return a.slice(1).map((q, i) => {
+    const p = a[i];
+    const dx = q[0] - p[0], dy = (q[1] - p[1]) * aspect;
+    const len = Math.hypot(dx, dy);
+    if (len < 8) return null;
+    const hot = active.includes(i);
+    const nx = -dy / len, ny = dx / len;
+    const mx = (p[0] + q[0]) / 2 + nx * 22, my = ((p[1] + q[1]) / 2) * aspect + ny * 22;
+    const t = fmtFt(len * k);
+    const w = t.length * 8 + 12;
+    return (
+      <g key={`m-${i}`} data-testid={`layout-seg-len-${i}`} style={{ pointerEvents: "none" }}>
+        <rect x={mx - w / 2} y={my - 11} width={w} height="22" rx="5" fill={hot ? "#F59E0B" : "#0B0F17"} opacity={hot ? 1 : 0.82} />
+        <text x={mx} y={my + 5} textAnchor="middle" fontSize="13" fontWeight="700" fill={hot ? "#0B0F17" : "#fff"} fontFamily="JetBrains Mono, monospace">{t}</text>
+      </g>
+    );
+  });
+};
+
+export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, onBegin, setDraft, url, snap, k }) => {
   const svgRef = useRef(null);
   const drag = useRef(null);
+  const [hit, setHit] = useState(null);
   const sy = (y) => y * aspect;
   const H = 1000 * aspect;
   const toPt = (e) => {
@@ -16,6 +42,12 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
     p.x = e.clientX; p.y = e.clientY;
     const r = p.matrixTransform(svg.getScreenCTM().inverse());
     return [clamp(r.x), clamp(r.y / aspect)];
+  };
+  const snapped = (kind, x, y, self) => {
+    if (!snap || !kind) { setHit(null); return [x, y]; }
+    const [sx, sy_, h] = snapPoint(d, kind, x, y, aspect, self);
+    setHit(h);
+    return [sx, sy_];
   };
   const grab = (s) => (e) => {
     if (tool !== "select") return;
@@ -27,16 +59,24 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
   };
   const down = (e) => {
     if (tool === "select") { setSel(null); return; }
-    const [x, y] = toPt(e);
+    const [x0, y0] = toPt(e);
+    const [x, y] = snapped(ADD_KINDS[tool], x0, y0);
+    setTimeout(() => setHit(null), 600);
     onAdd(tool, Math.round(x * 10) / 10, Math.round(y * 10) / 10);
   };
   const move = (e) => {
     if (!drag.current) return;
     if (!drag.current.pushed) { onBegin(); drag.current.pushed = true; }
-    const [x, y] = toPt(e);
-    onMove(drag.current.s, x, y, drag.current.start);
+    const { s } = drag.current;
+    const [x0, y0] = toPt(e);
+    const self = s.kind === "tile" || s.kind === "foot" ? { src: s.kind, v: s.v } : null;
+    const [x, y] = snapped(SNAP_KINDS[s.kind], x0, y0, self);
+    onMove(s, x, y, drag.current.start);
   };
-  const end = () => { drag.current = null; };
+  const end = () => { drag.current = null; setHit(null); };
+  const n = (d.drain_tile || []).length;
+  const isClosed = n > 2 && d.drain_tile[0][0] === d.drain_tile[n - 1][0] && d.drain_tile[0][1] === d.drain_tile[n - 1][1];
+  const activeSegs = sel?.kind === "tile" ? [sel.v - 1, sel.v, ...(isClosed && (sel.v === 0 || sel.v === n - 1) ? [0, n - 2] : [])].filter((i) => i >= 0 && i < n - 1) : [];
   const is = (k, i, v) => sel?.kind === k && (i === undefined || sel.i === i) && (v === undefined || sel.v === v);
   const h = { style: { cursor: tool === "select" ? "grab" : "crosshair", touchAction: "none" } };
   const ring = (x, y, r, color, on_) => <circle cx={x} cy={sy(y)} r={r} fill={on_ ? `${color}40` : "transparent"} stroke={on_ ? color : "transparent"} strokeDasharray="4 3" strokeWidth="2" />;
@@ -98,6 +138,7 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
           </g>
         ))}
         {on.tile && midHandles("drain_tile", C.tile)}
+        {on.tile && on.measure && <Measures d={d} k={k} aspect={aspect} active={activeSegs} />}
         {on.tile && vertexHandles("drain_tile", "tile", C.tile)}
         {on.foot && tool === "select" && midHandles("footprint", C.foot)}
         {on.foot && vertexHandles("footprint", "foot", C.foot)}
@@ -139,6 +180,13 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
             )}
           </g>
         ))}
+        {hit && (
+          <g data-testid="layout-snap-indicator" style={{ pointerEvents: "none" }}>
+            <circle cx={hit[0]} cy={sy(hit[1])} r="20" fill="none" stroke="#F59E0B" strokeWidth="3" />
+            <circle cx={hit[0]} cy={sy(hit[1])} r="4" fill="#F59E0B" />
+            {label(hit[0], sy(hit[1]), "#B45309", "SNAP", 22, -14, 12)}
+          </g>
+        )}
       </svg>
     </div>
   );

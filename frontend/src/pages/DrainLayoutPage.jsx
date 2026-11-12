@@ -7,9 +7,9 @@ import { LayoutCanvas } from "@/components/drain/LayoutCanvas";
 import { ToolPalette } from "@/components/drain/ToolPalette";
 import { Inspector } from "@/components/drain/Inspector";
 import { DrainTakeoff } from "@/components/app/DrainTakeoff";
-import { addAt, moveSel, removeSel, clone, toBody } from "@/components/drain/geometry";
+import { addAt, moveSel, removeSel, clone, toBody, ftPerUnit, tileFt, fmtFt } from "@/components/drain/geometry";
 
-const LAYERS = [["tile", "Drain tile"], ["foot", "Footing outline"], ["cleanouts", "Cleanouts"], ["sump", "Sumps & discharge"], ["slope", "Slope arrows"]];
+const LAYERS = [["tile", "Drain tile"], ["measure", "Lengths"], ["foot", "Footing outline"], ["cleanouts", "Cleanouts"], ["sump", "Sumps & discharge"], ["slope", "Slope arrows"]];
 const BLANK = { is_foundation: true, footprint: [], drain_tile: [], sump: null, sumps: [], cleanouts: [], discharge: null, slope_arrows: [], pipe_spec: "4\" perforated pipe in washed stone", length_ft: 0 };
 const pickFoundation = (pages) => (pages.find((p) => p.drain_status === "ready" && p.drain_overlay?.is_foundation !== false)
   || pages.find((p) => /foundation/i.test(`${p.title} ${p.sheet_number}`)) || pages[0]).index;
@@ -25,7 +25,8 @@ export default function DrainLayoutPage() {
   const [hist, setHist] = useState([]);
   const [sel, setSel] = useState(null);
   const [tool, setTool] = useState("select");
-  const [on, setOn] = useState({ tile: true, foot: true, cleanouts: true, sump: true, slope: true });
+  const [on, setOn] = useState({ tile: true, measure: true, foot: true, cleanouts: true, sump: true, slope: true });
+  const [snap, setSnap] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(() => getProject(pid).then((p) => { setProject(p); setIdx((i) => (i ?? pickFoundation(p.pages))); return p; }), [pid]);
@@ -35,6 +36,8 @@ export default function DrainLayoutPage() {
   const status = page?.drain_status || "none";
   const saved = page?.drain_status === "ready" && page.drain_overlay?.is_foundation !== false ? page.drain_overlay : null;
   const dirty = !!draft && JSON.stringify(toBody(draft)) !== JSON.stringify(toBody(saved || BLANK)) || !!draft?._length_set;
+  const k = ftPerUnit(saved, draft, page, aspect);
+  const liveFt = draft && k ? tileFt(draft, k, aspect) : 0;
 
   useEffect(() => { setDraft(saved ? clone(saved) : null); setHist([]); setSel(null); }, [idx, saved?.edited_at, saved?.edited, status]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -131,6 +134,9 @@ export default function DrainLayoutPage() {
                   <input type="checkbox" data-testid={`layout-layer-${k}`} checked={on[k]} onChange={() => setOn({ ...on, [k]: !on[k] })} className="accent-cyan-500" />{l}
                 </label>
               ))}
+              <label className="flex items-center gap-1.5 text-xs text-amber-300 cursor-pointer border-l border-slate-700 pl-3" title="Snap points to footing corners (and fittings to tile corners)">
+                <input type="checkbox" data-testid="layout-snap-toggle" checked={snap} onChange={() => setSnap(!snap)} className="accent-amber-500" />Snap to corners
+              </label>
               <div className="ml-auto flex flex-wrap gap-2">
                 {saved?.ai_original && <button data-testid="layout-reset-ai" onClick={resetAi} disabled={saving} className="flex items-center gap-1.5 text-xs border border-slate-700 rounded-md px-3 py-1.5 hover:bg-slate-800"><Undo2 className="h-3.5 w-3.5" />Original layout</button>}
                 {saved && <button data-testid="layout-delete-layout" onClick={removeLayout} className="flex items-center gap-1.5 text-xs border border-red-500/40 text-red-300 rounded-md px-3 py-1.5 hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" />Delete layout</button>}
@@ -149,7 +155,7 @@ export default function DrainLayoutPage() {
           <div className="bg-white rounded-xl overflow-x-auto border border-slate-800" data-testid="layout-scroll">
             {!url && <div className="h-96 bg-[#111827] flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-cyan-400" /></div>}
             {url && draft && (
-              <LayoutCanvas d={draft} aspect={aspect} on={on} tool={tool} sel={sel} setSel={setSel} url={url} onBegin={begin} setDraft={setDraft}
+              <LayoutCanvas d={draft} aspect={aspect} on={on} tool={tool} sel={sel} setSel={setSel} url={url} onBegin={begin} setDraft={setDraft} snap={snap} k={k}
                 onAdd={(t, x, y) => { const [o, s] = addAt(draft, t, x, y); apply(o); setSel(s); }}
                 onMove={(s, x, y, start) => setDraft((d) => moveSel(d, s, x, y, start))} />
             )}
@@ -161,6 +167,9 @@ export default function DrainLayoutPage() {
               <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 text-xs text-slate-400 space-y-1" data-testid="layout-counts">
                 <p className="flex items-center gap-1.5 text-slate-200 font-semibold"><Ruler className="h-3.5 w-3.5 text-cyan-400" />On this layout</p>
                 <p>{(draft.drain_tile || []).length} tile points · {(draft.cleanouts || []).length} cleanouts · {(draft.sump?.x != null ? 1 : 0) + (draft.sumps || []).length} sumps/pumps · {(draft.slope_arrows || []).length} slope arrows</p>
+                <p className="font-mono text-sm text-cyan-300" data-testid="layout-live-length">
+                  {k ? `Drain tile: ${liveFt.toFixed(1)} LF (${fmtFt(liveFt)})` : "Enter the measured tile length in the side panel to show lengths"}
+                </p>
                 {dirty && <p className="text-amber-300" data-testid="layout-unsaved">Unsaved changes — save to update the takeoff, PNG and reports.</p>}
               </div>
             </div>
