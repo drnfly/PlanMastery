@@ -214,7 +214,12 @@ def drain_takeoff_section(tk: dict | None) -> list:
 def drain_layout_section(imgs: list) -> list:
     flow = []
     for label, png, notes, stakes in imgs:
-        flow += [P(f"Drain tile layout — {label}", "h2"), sheet_image(png, 8.0)] + bullets(notes) + [PageBreak()]
+        full, zoom = png if isinstance(png, list) else (png, None)
+        flow += [P(f"Drain tile layout — {label}", "h2"), sheet_image(full, 8.0)] + bullets(notes) + [PageBreak()]
+        if zoom:
+            flow += [P(f"Stake-out plan — {label}", "h2"),
+                     P("Zoomed to the foundation. Dashed lines run from each cleanout and sump to its nearest footing corner.", "meta"),
+                     Spacer(1, 6), sheet_image(zoom, 8.0), PageBreak()]
         if stakes:
             flow += [P(f"Stake-out distances — {label}", "h2"),
                      P("Straight-line distance from each cleanout and sump to the nearest footing corner (corners C1, C2… are "

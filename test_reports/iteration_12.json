@@ -1,0 +1,32 @@
+{
+  "summary": "Tested Point Measurements (stake-out distances) and the Drainage-only PDF, backend and frontend, at 1920px. Backend: 7/7 pytest pass. POST /report crew=drainage returns a 7-page PDF named *_drainage_report.pdf on project eb4fb34f. It has the 'In this report' list, the layout image with corner markers C1..C8 and dashed stake lines with ft-in labels, a stake-out table with all 8 items (CO-1..CO-6, SUMP, SP-2), the drainage material takeoff and the checklist. Project c5675b5d works too. A project with no layout returns 400 'Draw the drain tile layout on the foundation sheet first'; an unknown project returns 404; the full, foundation and waterproofing crews still return PDFs. Frontend: the Stake-out layer checkbox is on by default. 8 corner labels, 8 stake lines and 8 list rows show, and the list values match the PDF table exactly. Toggling the layer hides and shows layout-stakes. Clicking a row selects the item: the inspector shows Cleanout (label CO-3), Main sump or Sump / pump, the row is highlighted and the stake label turns amber. Dragging CO-1 updates the list and drawing live (1'-7\" -> 9'-3\" mid-drag -> 10'-8\"), and the nearest corner changes (C1 -> C7 -> C4 -> C5). Dragging the main sump: 5'-0\" -> 6'-3\" -> 12'-7\", corner C7 -> C4. + Cleanout adds row CO-7 with a stake line; Delete removes it; deleting CO-1 re-indexes the rows correctly. Discard restores everything. On manual 'Draw it myself' on FD2, stakeout-no-corners shows (also after adding a cleanout); after tracing the footing, rows show '—' plus the 'Enter the measured tile length' hint. Report dialog: report-type-drainage shows report-drainage-note (the checklist text only appears when the drainage tool is ready), hides the images and Q&A toggles, and downloads 2612163R2_with_detail_sheets_1__drainage_report.pdf (266KB). A project with no layout shows the error toast and the dialog stays open. No page errors. Saved layouts were not changed (checked through the API afterwards).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "SetToolbar PDF report button", "issue": "open-report-dialog-button is disabled={!scanned}. A project with a manual drain layout but 0 scanned sheets can never open the dialog to get the Drainage only report, even though the backend drainage report does not need scans. Seen on bbed49f5 (0/1 scanned). Enable the button when any page has drain_status==='ready'; the download button already blocks only 'full' when there are no scans.", "selector": "[data-testid=open-report-dialog-button]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Drain layout FD1 canvas and PDF layout image", "issues": ["The footing covers only about 25% of the sheet, and cleanouts sit 1.5-3 ft from the corners. So the stake labels, corner labels C1..C8, cleanout labels and segment-length labels all pile up on top of each other near the corners, and several distance labels are not readable (also in the PDF page 2 image). Ideas: offset stake labels outward from the footing, use leader lines, and/or crop or zoom the PDF image to the footing extents. The stake-out table on the next PDF page stays readable."]},
+      {"screen": "Report dialog (Drainage only)", "issues": ["With the drainage type there are no toggles, but the border-t wrapper div still draws an empty divider line above the Download button.", "The 5-option type toggle wraps 'Waterproofing crew' onto 2 lines (minor)."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter12_stakeout_drainage_report.py", "/app/test_reports/pytest/pytest_iter12.xml"],
+  "action_items": [
+    "Enable the PDF report button (SetToolbar) when the project has any saved drain layout, even with 0 scanned sheets, so 'Drainage only' can be reached",
+    "Reduce stake-label clutter on the canvas and in the PDF render: offset labels, or crop the PDF layout image to the footing bbox",
+    "Hide the empty divider in ReportDialog when crew==='drainage'"
+  ],
+  "critical_code_review_comments": [
+    "Frontend (geometry.stakeouts: SVG units * k) and backend (overlay.stakeouts: px * ft_per_px) give identical results (checked across 8 items), good",
+    "overlay.stakeouts falls back to length_ft / tile px only when ft_per_px is missing. This matches the frontend ftPerUnit, but a draft calibrated with _k is only right after saving (expected)",
+    "Manual layout: if a length is typed before any drain tile exists, svgLen=0, so _k=0 and distances stay '—' while the hint still says 'Enter the measured tile length'. This edge case could confuse users; the hint could say 'Draw the drain tile, then enter its length'",
+    "Before the sheet image loads, the live length showed 137.4 LF; it was 138.2 once loaded. Aspect defaults until the image loads, so stake distances can show slightly wrong values for a moment (cosmetic)"
+  ],
+  "updated_files": ["/app/backend/tests/test_iter12_stakeout_drainage_report.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "~93% (all requested flows pass; 1 medium gating issue: report button disabled when 0 scans)"},
+  "seed_data_creation": "None. All canvas edits were discarded (layout-cancel); eb4fb34f page 0 overlay checked unchanged (6 cleanouts, sump 369.6/133.2, 138.2 LF). The PDF downloads re-sent the existing brand fields unchanged.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "eb4fb34f page 0 (FD1) has 8 footing corners; stake list baseline: CO-1 C1 1'-7\", CO-2 C8 3'-1\", CO-3 C6 2'-6\", CO-4 C5 3'-4\", CO-5 C2 1'-10\", CO-6 C3 2'-7\", SUMP C7 5'-0\", SP-2 C3 6'-5\". To drag the main sump, grab its rect: the bbox center of the group lands on the label or a slope arrow. Hide the Lengths, Slope and Cleanouts layers first. bbed49f5 has 0 scans (LLM budget exceeded message is on that page); 3e6ac9ca has scans but no layout (400 path). The PDF text check uses fitz (pymupdf); pypdf is not installed."
+}

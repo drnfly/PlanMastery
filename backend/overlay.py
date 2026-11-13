@@ -111,13 +111,50 @@ def _draw_stakes(d, ov, w, h, lw, font):
             d.text((mx, my), fmt_ft(s["ft"]), fill=(255, 255, 255, 255), font=font, anchor="mm", stroke_width=4, stroke_fill=STAKE + (255,))
 
 
-def render_overlay(image: bytes, ov: dict, stake: bool = False) -> bytes:
+def _crop(img, ov: dict, margin: float = 0.12):
+    w, h = img.size
+    xs, ys = [], []
+    for key in ("footprint", "drain_tile"):
+        for p in ov.get(key) or []:
+            xs.append(p[0]); ys.append(p[1])
+    for p in (ov.get("discharge") or {}).get("points") or []:
+        xs.append(p[0]); ys.append(p[1])
+    for it in (ov.get("cleanouts") or []) + (ov.get("sumps") or []) + [ov.get("sump") or {}]:
+        if it.get("x") is not None:
+            xs.append(it["x"]); ys.append(it["y"])
+    if not xs:
+        return img, ov
+    x0, x1, y0, y1 = min(xs) * w / 1000, max(xs) * w / 1000, min(ys) * h / 1000, max(ys) * h / 1000
+    m = max(x1 - x0, y1 - y0) * margin + 40
+    box = (int(max(x0 - m, 0)), int(max(y0 - m, 0)), int(min(x1 + m, w)), int(min(y1 + m, h)))
+    cw, ch = box[2] - box[0], box[3] - box[1]
+    fx = lambda x: (x * w / 1000 - box[0]) * 1000 / cw  # noqa: E731
+    fy = lambda y: (y * h / 1000 - box[1]) * 1000 / ch  # noqa: E731
+    tp = lambda a: [[fx(p[0]), fy(p[1])] for p in a or [] if isinstance(p, (list, tuple)) and len(p) >= 2]  # noqa: E731
+    tx = lambda it: {**it, "x": fx(it["x"]), "y": fy(it["y"])} if it and it.get("x") is not None else it  # noqa: E731
+    o = {**ov, "footprint": tp(ov.get("footprint")), "drain_tile": tp(ov.get("drain_tile")),
+         "cleanouts": [tx(c) for c in ov.get("cleanouts") or []], "sump": tx(ov.get("sump")),
+         "sumps": [{**tx(s), "outlet": [fx(s["outlet"][0]), fy(s["outlet"][1])] if s.get("outlet") else None} for s in ov.get("sumps") or []],
+         "slope_arrows": [{**a, "x1": fx(a["x1"]), "y1": fy(a["y1"]), "x2": fx(a["x2"]), "y2": fy(a["y2"])} for a in ov.get("slope_arrows") or []]}
+    if ov.get("discharge"):
+        o["discharge"] = {**ov["discharge"], "points": tp(ov["discharge"].get("points"))}
+    if not ov.get("ft_per_px") and ov.get("length_ft"):
+        tile = _pts(ov.get("drain_tile"), w, h)
+        px = sum(math.dist(a, b) for a, b in zip(tile, tile[1:]))
+        o["ft_per_px"] = float(ov["length_ft"]) / px if px else 0
+    return img.crop(box), o
+
+
+def render_overlay(image: bytes, ov: dict, stake: bool = False, crop: bool = False) -> bytes:
     img = Image.open(io.BytesIO(image)).convert("RGB")
+    full = max(img.size)
+    if crop:
+        img, ov = _crop(img, ov)
     w, h = img.size
     layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    lw = max(int(max(w, h) / 300), 3)
-    font = ImageFont.load_default(size=max(int(max(w, h) / 90), 14))
+    lw = max(int(full / 300 * (0.55 if crop else 1)), 2)
+    font = ImageFont.load_default(size=max(int(full / 90 * (0.6 if crop else 1)), 12))
 
     foot = _pts(ov.get("footprint"), w, h)
     if len(foot) > 2:
@@ -189,13 +226,18 @@ def render_overlay(image: bytes, ov: dict, stake: bool = False) -> bytes:
         return min((math.dist((cx, cy), m) for m in marks), default=1e9)
     x0, y0 = max(corners, key=clearance) if marks else corners[0]
     x0, y0 = max(x0, 0), max(y0, 0)
-    d.rectangle([x0, y0, x0 + box_w, y0 + box_h], fill=(255, 255, 255, 235), outline=(30, 41, 59, 255), width=2)
+    out = Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
+    if crop:
+        ext = Image.new("RGB", (max(w, box_w + pad * 2), h + box_h + pad * 2), (255, 255, 255))
+        ext.paste(out, (0, 0))
+        out, x0, y0 = ext, pad, h + pad
+    d = ImageDraw.Draw(out)
+    d.rectangle([x0, y0, x0 + box_w, y0 + box_h], fill=(255, 255, 255), outline=(30, 41, 59), width=2)
     for i, (col, t) in enumerate(items):
         yy = y0 + pad + i * row
-        d.rectangle([x0 + pad, yy + 3, x0 + pad + row - 8, yy + row - 8], fill=col + (255,))
-        d.text((x0 + pad * 2 + row - 8, yy), t, fill=(15, 23, 42, 255), font=font)
+        d.rectangle([x0 + pad, yy + 3, x0 + pad + row - 8, yy + row - 8], fill=col)
+        d.text((x0 + pad * 2 + row - 8, yy), t, fill=(15, 23, 42), font=font)
 
-    out = Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
     buf = io.BytesIO()
     out.save(buf, "PNG", optimize=True)
     return buf.getvalue()

@@ -34,7 +34,7 @@ export const SetToolbar = ({ project, onChange }) => {
         {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
         {deep === pages.length ? "Set fully scanned" : running ? "Scanning…" : pages.length > 1 ? "Scan entire set" : "Deep scan sheet"}
       </button>
-      <button data-testid="open-report-dialog-button" onClick={() => setOpen(true)} disabled={!scanned}
+      <button data-testid="open-report-dialog-button" onClick={() => setOpen(true)} disabled={!scanned && !pages.some((pg) => pg.drain_status === "ready")}
         className="flex items-center gap-2 rounded-md bg-amber-500 text-[#0B0F17] font-semibold px-3 py-2 text-sm hover:bg-amber-400 disabled:opacity-40 active:scale-95 transition-[background-color,transform]">
         <FileDown className="h-4 w-4" /> PDF report
       </button>

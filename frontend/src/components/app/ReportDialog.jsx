@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { getBrand, uploadLogo, deleteLogo, fetchLogo, downloadReport, runTool } from "@/lib/api";
 
 const FIELDS = [["company_name", "Company name"], ["prepared_by", "Prepared by"], ["phone", "Phone"], ["email", "Email"], ["client", "Prepared for (client / GC)"]];
-const TYPES = [["full", "Full set"], ["foundation", "Foundation crew"], ["icf", "ICF crew"], ["waterproofing", "Waterproofing crew"], ["drainage", "Drainage only"]];
+const TYPES = [["full", "Full set"], ["foundation", "Foundation crew"], ["icf", "ICF crew"], ["waterproofing", "Waterproofing"], ["drainage", "Drainage only"]];
 
 const Toggle = ({ id, label, checked, onChange }) => (
   <label className="flex items-center justify-between text-sm text-slate-300 py-1">
@@ -98,10 +98,10 @@ export const ReportDialog = ({ open, onOpenChange, project, scannedCount, onChan
               className={`bg-[#0B0F17] border border-slate-800 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 ${k === "client" ? "col-span-2" : ""}`} />
           ))}
         </div>
-        <div className="border-t border-slate-800 pt-2">
-          {crew !== "drainage" && <Toggle id="report-include-images-switch" label="Include sheet images" checked={images} onChange={setImages} />}
+        {crew !== "drainage" && <div className="border-t border-slate-800 pt-2">
+          <Toggle id="report-include-images-switch" label="Include sheet images" checked={images} onChange={setImages} />
           {crew === "full" && <Toggle id="report-include-qa-switch" label="Include expert Q&A from chat" checked={qa} onChange={setQa} />}
-        </div>
+        </div>}
         <button data-testid="report-download-button" onClick={download} disabled={busy || !crewReady || (crew === "full" && !scannedCount)}
           className="w-full flex items-center justify-center gap-2 rounded-md bg-amber-500 text-[#0B0F17] font-semibold py-2.5 hover:bg-amber-400 disabled:opacity-50 active:scale-[0.98] transition-[background-color,transform]">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />} {busy ? "Building PDF…" : "Download PDF report"}

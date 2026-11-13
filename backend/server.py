@@ -407,7 +407,10 @@ async def drain_images(pid: str, stake: bool = False) -> list:
         if ov.get("is_foundation") is False:
             continue
         try:
-            png = await asyncio.to_thread(render_overlay, await fetch(pg["image_path"]), ov, stake)
+            img = await fetch(pg["image_path"])
+            png = await asyncio.to_thread(render_overlay, img, ov)
+            if stake:
+                png = [png, await asyncio.to_thread(render_overlay, img, ov, True, True)]
             stakes = stakeouts(ov, pg.get("img_w") or 1000, pg.get("img_h") or 1000) if stake else []
             out.append((sheet_label(pg), png, ov.get("notes") or [], stakes))
         except Exception:
