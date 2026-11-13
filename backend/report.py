@@ -8,6 +8,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
+from overlay import fmt_ft
 from reportlab.platypus import (BaseDocTemplate, Frame, PageTemplate, Paragraph, Spacer, Table, TableStyle,
                                 Image, PageBreak, KeepTogether)
 
@@ -128,7 +129,7 @@ def simple_table(headers: list, rows: list, widths: list, bg=INK) -> Table:
     return t
 
 
-CREW_TITLES = {"foundation": "FOUNDATION CREW PACKET", "icf": "ICF WALL CREW PACKET", "waterproofing": "WATERPROOFING CREW PACKET"}
+CREW_TITLES = {"drainage": "DRAINAGE REPORT", "foundation": "FOUNDATION CREW PACKET", "icf": "ICF WALL CREW PACKET", "waterproofing": "WATERPROOFING CREW PACKET"}
 
 
 def crew_section(packet: dict) -> list:
@@ -197,6 +198,35 @@ def wp_section(wp: dict, title: str = "Waterproofing checklist") -> list:
     return flow + [PageBreak()]
 
 
+def drain_takeoff_section(tk: dict | None) -> list:
+    if not tk:
+        return []
+    pr = tk["params"]
+    return [P("Drainage material takeoff", "h2"),
+            P(f"From drain tile layout on {tk['sheet']} · {pr['tile_lf']:g} LF tile · waste {pr['waste_pct']:g}% · "
+              f"stone trench {pr['trench_width_in']:g}\" x {pr['stone_depth_in']:g}\"", "meta"), Spacer(1, 6),
+            simple_table(["Group", "Material", "Spec", "Qty", "Unit", "Notes"],
+                         [[ln["group"], ln["item"], ln["spec"], ln["qty"], ln["unit"], ln["notes"]] for ln in tk["lines"]],
+                         [0.8, 1.9, 1.7, 0.6, 0.45, 1.85], AMBER),
+            Spacer(1, 4), P("Quantities include waste and are for ordering estimates — confirm on site.", "meta"), PageBreak()]
+
+
+def drain_layout_section(imgs: list) -> list:
+    flow = []
+    for label, png, notes, stakes in imgs:
+        flow += [P(f"Drain tile layout — {label}", "h2"), sheet_image(png, 8.0)] + bullets(notes) + [PageBreak()]
+        if stakes:
+            flow += [P(f"Stake-out distances — {label}", "h2"),
+                     P("Straight-line distance from each cleanout and sump to the nearest footing corner (corners C1, C2… are "
+                       "marked on the layout drawing).", "meta"), Spacer(1, 6),
+                     simple_table(["Item", "Type", "Nearest corner", "Distance", "Feet"],
+                                  [[s["label"], s["kind"], f"C{s['corner']}", fmt_ft(s["ft"]) if s["ft"] is not None else "Set tile length",
+                                    f"{s['ft']:.2f}" if s["ft"] is not None else "—"] for s in stakes], [1.6, 1.2, 1.4, 1.6, 1.5], AMBER),
+                     Spacer(1, 4), P("Measure from the outside face of the footing corner. Verify against plans before excavating.", "meta"),
+                     PageBreak()]
+    return flow
+
+
 def build_report(project: dict, pages: list, images: dict, brand: dict, logo: bytes | None, qa: list, extras: dict | None = None) -> bytes:
     extras = extras or {}
     crew = extras.get("crew", "full")
@@ -241,40 +271,37 @@ def build_report(project: dict, pages: list, images: dict, brand: dict, logo: by
     contact = " · ".join(x for x in [brand.get("prepared_by"), brand.get("phone"), brand.get("email")] if x)
     flow = [Spacer(1, 0.6 * inch), P(CREW_TITLES.get(crew, "DIMENSION TAKEOFF REPORT"), "h3"), P(project["name"], "h1"), Spacer(1, 8),
             P(f"Prepared by {company}" + (f" — {contact}" if contact else ""), "meta"),
-            P(f"Issued {date} · {len(pages)} of {project.get('page_count', len(pages))} sheets in set", "meta")]
+            P(f"Issued {date}" + ("" if crew == "drainage" else f" · {len(pages)} of {project.get('page_count', len(pages))} sheets in set"), "meta")]
     if brand.get("client"):
         flow.append(P(f"Prepared for {brand['client']}", "meta"))
-    flow += [Spacer(1, 18), P("Sheets in this report", "h3")]
-    rows = [[P(h, "head") for h in ["Sheet", "Title", "Discipline", "Type", "Rooms", "Walls", "Openings"]]]
-    for pg in pages:
-        a = pg["analysis"]
-        rows.append([P(pg.get("sheet_number") or f"P{pg['index'] + 1}", "cell"), P(pg.get("title"), "cell"),
-                     P(pg.get("discipline"), "cell"), P(a.get("drawing_type"), "cell"),
-                     P(len(a.get("rooms") or []), "cell"), P(len(a.get("walls") or []), "cell"), P(len(a.get("openings") or []), "cell")])
-    t = grid(rows)
-    t._argW = [w * inch for w in (0.8, 2.2, 1.0, 1.2, 0.6, 0.6, 0.9)]
-    flow += [t, PageBreak()]
-
-    if extras.get("packet"):
-        flow += crew_section(extras["packet"])
-    if extras.get("icf"):
-        flow += icf_section(extras["icf"])
-    if extras.get("wp"):
-        flow += wp_section(extras["wp"])
-    if extras.get("drain"):
-        flow += wp_section(extras["drain"], "Drainage plan")
-    if extras.get("drain_takeoff"):
-        tk = extras["drain_takeoff"]
-        pr = tk["params"]
-        flow += [P("Drainage material takeoff", "h2"),
-                 P(f"From drain tile layout on {tk['sheet']} · {pr['tile_lf']:g} LF tile · waste {pr['waste_pct']:g}% · "
-                   f"stone trench {pr['trench_width_in']:g}\" x {pr['stone_depth_in']:g}\"", "meta"), Spacer(1, 6),
-                 simple_table(["Group", "Material", "Spec", "Qty", "Unit", "Notes"],
-                              [[ln["group"], ln["item"], ln["spec"], ln["qty"], ln["unit"], ln["notes"]] for ln in tk["lines"]],
-                              [0.8, 1.9, 1.7, 0.6, 0.45, 1.85], AMBER),
-                 Spacer(1, 4), P("Quantities include waste and are for ordering estimates — confirm on site.", "meta"), PageBreak()]
-    for label, png, notes in extras.get("drain_images") or []:
-        flow += [P(f"Drain tile layout — {label}", "h2"), sheet_image(png, 8.0)] + bullets(notes) + [PageBreak()]
+    imgs = extras.get("drain_images") or []
+    if crew == "drainage":
+        flow += [Spacer(1, 18), P("In this report", "h3")] + bullets(
+            ["Drain tile layout drawing with stake-out lines"] + (["Stake-out distance table"] if any(i[3] for i in imgs) else [])
+            + (["Drainage material takeoff"] if extras.get("drain_takeoff") else []) + (["Drainage plan checklist"] if extras.get("drain") else []))
+        flow += [PageBreak()] + drain_layout_section(imgs) + drain_takeoff_section(extras.get("drain_takeoff"))
+        if extras.get("drain"):
+            flow += wp_section(extras["drain"], "Drainage plan checklist")
+    else:
+        flow += [Spacer(1, 18), P("Sheets in this report", "h3")]
+        rows = [[P(h, "head") for h in ["Sheet", "Title", "Discipline", "Type", "Rooms", "Walls", "Openings"]]]
+        for pg in pages:
+            a = pg["analysis"]
+            rows.append([P(pg.get("sheet_number") or f"P{pg['index'] + 1}", "cell"), P(pg.get("title"), "cell"),
+                         P(pg.get("discipline"), "cell"), P(a.get("drawing_type"), "cell"),
+                         P(len(a.get("rooms") or []), "cell"), P(len(a.get("walls") or []), "cell"), P(len(a.get("openings") or []), "cell")])
+        t = grid(rows)
+        t._argW = [w * inch for w in (0.8, 2.2, 1.0, 1.2, 0.6, 0.6, 0.9)]
+        flow += [t, PageBreak()]
+        if extras.get("packet"):
+            flow += crew_section(extras["packet"])
+        if extras.get("icf"):
+            flow += icf_section(extras["icf"])
+        if extras.get("wp"):
+            flow += wp_section(extras["wp"])
+        if extras.get("drain"):
+            flow += wp_section(extras["drain"], "Drainage plan")
+        flow += drain_takeoff_section(extras.get("drain_takeoff")) + drain_layout_section(imgs)
 
     for pg in pages:
         flow += sheet_section(pg, images.get(pg["index"]))

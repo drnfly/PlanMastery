@@ -6,10 +6,11 @@ import { getProject, fetchPageImage, startDrainOverlay, editDrainOverlay, fetchD
 import { LayoutCanvas } from "@/components/drain/LayoutCanvas";
 import { ToolPalette } from "@/components/drain/ToolPalette";
 import { Inspector } from "@/components/drain/Inspector";
+import { StakeoutList } from "@/components/drain/StakeoutList";
 import { DrainTakeoff } from "@/components/app/DrainTakeoff";
-import { addAt, moveSel, removeSel, clone, toBody, ftPerUnit, tileFt, fmtFt, svgLen } from "@/components/drain/geometry";
+import { addAt, moveSel, removeSel, clone, toBody, ftPerUnit, tileFt, fmtFt, svgLen, stakeouts, corners } from "@/components/drain/geometry";
 
-const LAYERS = [["tile", "Drain tile"], ["measure", "Lengths"], ["foot", "Footing outline"], ["cleanouts", "Cleanouts"], ["sump", "Sumps & discharge"], ["slope", "Slope arrows"]];
+const LAYERS = [["tile", "Drain tile"], ["measure", "Lengths"], ["stake", "Stake-out"], ["foot", "Footing outline"], ["cleanouts", "Cleanouts"], ["sump", "Sumps & discharge"], ["slope", "Slope arrows"]];
 const BLANK = { is_foundation: true, footprint: [], drain_tile: [], sump: null, sumps: [], cleanouts: [], discharge: null, slope_arrows: [], pipe_spec: "4\" perforated pipe in washed stone", length_ft: 0 };
 const pickFoundation = (pages) => (pages.find((p) => p.drain_status === "ready" && p.drain_overlay?.is_foundation !== false)
   || pages.find((p) => /foundation/i.test(`${p.title} ${p.sheet_number}`)) || pages[0]).index;
@@ -25,7 +26,7 @@ export default function DrainLayoutPage() {
   const [hist, setHist] = useState([]);
   const [sel, setSel] = useState(null);
   const [tool, setTool] = useState("select");
-  const [on, setOn] = useState({ tile: true, measure: true, foot: true, cleanouts: true, sump: true, slope: true });
+  const [on, setOn] = useState({ tile: true, measure: true, stake: true, foot: true, cleanouts: true, sump: true, slope: true });
   const [snap, setSnap] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -38,6 +39,7 @@ export default function DrainLayoutPage() {
   const dirty = !!draft && JSON.stringify(toBody(draft)) !== JSON.stringify(toBody(saved || BLANK)) || !!draft?._length_set;
   const k = ftPerUnit(saved, draft, page, aspect);
   const liveFt = draft && k ? tileFt(draft, k, aspect) : 0;
+  const stakes = useMemo(() => (draft ? stakeouts(draft, k, aspect) : []), [draft, k, aspect]);
 
   useEffect(() => { setDraft(saved ? clone(saved) : null); setHist([]); setSel(null); }, [idx, saved?.edited_at, saved?.edited, status]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -161,7 +163,7 @@ export default function DrainLayoutPage() {
           <div className="bg-white rounded-xl overflow-x-auto border border-slate-800" data-testid="layout-scroll">
             {!url && <div className="h-96 bg-[#111827] flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-cyan-400" /></div>}
             {url && draft && (
-              <LayoutCanvas d={draft} aspect={aspect} on={on} tool={tool} sel={sel} setSel={setSel} url={url} onBegin={begin} setDraft={setDraft} snap={snap} k={k}
+              <LayoutCanvas d={draft} aspect={aspect} on={on} tool={tool} sel={sel} setSel={setSel} url={url} onBegin={begin} setDraft={setDraft} snap={snap} k={k} stakes={stakes}
                 onAdd={(t, x, y) => { const [o, s] = addAt(draft, t, x, y); apply(o); setSel(s); }}
                 onMove={(s, x, y, start) => setDraft((d) => moveSel(d, s, x, y, start))} />
             )}
@@ -178,6 +180,7 @@ export default function DrainLayoutPage() {
                 </p>
                 {dirty && <p className="text-amber-300" data-testid="layout-unsaved">Unsaved changes — save to update the takeoff, PNG and reports.</p>}
               </div>
+              <StakeoutList rows={stakes} sel={sel} setSel={setSel} hasCorners={corners(draft).length > 0} />
             </div>
           )}
         </div>

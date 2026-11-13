@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { getBrand, uploadLogo, deleteLogo, fetchLogo, downloadReport, runTool } from "@/lib/api";
 
 const FIELDS = [["company_name", "Company name"], ["prepared_by", "Prepared by"], ["phone", "Phone"], ["email", "Email"], ["client", "Prepared for (client / GC)"]];
-const TYPES = [["full", "Full set"], ["foundation", "Foundation crew"], ["icf", "ICF crew"], ["waterproofing", "Waterproofing crew"]];
+const TYPES = [["full", "Full set"], ["foundation", "Foundation crew"], ["icf", "ICF crew"], ["waterproofing", "Waterproofing crew"], ["drainage", "Drainage only"]];
 
 const Toggle = ({ id, label, checked, onChange }) => (
   <label className="flex items-center justify-between text-sm text-slate-300 py-1">
@@ -40,7 +40,7 @@ export const ReportDialog = ({ open, onOpenChange, project, scannedCount, onChan
   const [crew, setCrew] = useState("full");
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
-  const crewReady = crew === "full" || project.tools?.[`crew_${crew}`]?.status === "ready";
+  const crewReady = crew === "full" || crew === "drainage" || project.tools?.[`crew_${crew}`]?.status === "ready";
 
   const loadLogo = () => fetchLogo().then((b) => setLogo(URL.createObjectURL(b))).catch(() => setLogo(null));
   useEffect(() => { if (open) { getBrand().then((b) => { setBrand(b); if (b.logo_path) loadLogo(); }); } }, [open]);
@@ -55,7 +55,7 @@ export const ReportDialog = ({ open, onOpenChange, project, scannedCount, onChan
     try {
       const { logo_path, ...fields } = brand;
       const blob = await downloadReport(project.id, { brand: fields, include_images: images, include_qa: qa, crew });
-      const suffix = crew === "full" ? "takeoff_report" : `${crew}_crew_packet`;
+      const suffix = crew === "full" ? "takeoff_report" : crew === "drainage" ? "drainage_report" : `${crew}_crew_packet`;
       const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `${project.name.replace(/[^\w-]+/g, "_")}_${suffix}.pdf` });
       a.click();
       toast.success("Report downloaded");
@@ -74,13 +74,14 @@ export const ReportDialog = ({ open, onOpenChange, project, scannedCount, onChan
           <DialogDescription className="text-slate-400">{scannedCount} of {project.page_count} sheets scanned. Branding is saved for next time.</DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <div className="grid grid-cols-4 gap-1 bg-[#0B0F17] border border-slate-800 rounded-lg p-1" data-testid="report-type-toggle">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-1 bg-[#0B0F17] border border-slate-800 rounded-lg p-1" data-testid="report-type-toggle">
             {TYPES.map(([k, l]) => (
               <button key={k} data-testid={`report-type-${k}`} onClick={() => setCrew(k)}
                 className={`rounded-md py-1.5 text-[11px] font-medium transition-colors ${crew === k ? "bg-cyan-500 text-[#0B0F17]" : "text-slate-400 hover:text-slate-100"}`}>{l}</button>
             ))}
           </div>
-          {crew !== "full" && <CrewState project={project} crew={crew} onChange={onChange} />}
+          {crew === "drainage" && <p className="text-xs text-slate-400" data-testid="report-drainage-note">Drain tile layout drawing with stake-out lines, stake-out distance table, drainage material takeoff{project.tools?.drainage?.status === "ready" ? " and the drainage plan checklist" : ""}. Needs a saved drain tile layout.</p>}
+          {!["full", "drainage"].includes(crew) && <CrewState project={project} crew={crew} onChange={onChange} />}
           {crew === "full" && <p className="text-xs text-slate-500">Includes every scanned sheet{project.tools?.icf?.status === "ready" ? ", the ICF estimate" : ""}{project.tools?.waterproofing?.status === "ready" ? ", the waterproofing checklist" : ""}.</p>}
         </div>
         <div className="flex items-center gap-3">
@@ -98,7 +99,7 @@ export const ReportDialog = ({ open, onOpenChange, project, scannedCount, onChan
           ))}
         </div>
         <div className="border-t border-slate-800 pt-2">
-          <Toggle id="report-include-images-switch" label="Include sheet images" checked={images} onChange={setImages} />
+          {crew !== "drainage" && <Toggle id="report-include-images-switch" label="Include sheet images" checked={images} onChange={setImages} />}
           {crew === "full" && <Toggle id="report-include-qa-switch" label="Include expert Q&A from chat" checked={qa} onChange={setQa} />}
         </div>
         <button data-testid="report-download-button" onClick={download} disabled={busy || !crewReady || (crew === "full" && !scannedCount)}

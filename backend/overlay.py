@@ -56,7 +56,62 @@ def sump_text(s: dict, default: str) -> str:
     return " · ".join(bits).replace(" · ", " - ")
 
 
-def render_overlay(image: bytes, ov: dict) -> bytes:
+STAKE = (180, 83, 9)
+
+
+def fmt_ft(f: float) -> str:
+    ft, inch = int(f), round((f - int(f)) * 12)
+    if inch == 12:
+        ft, inch = ft + 1, 0
+    return f"{ft}'-{inch}\""
+
+
+def corner_pts(ov: dict) -> list:
+    a = [p for p in ov.get("footprint") or [] if isinstance(p, (list, tuple)) and len(p) >= 2]
+    return a[:-1] if len(a) > 2 and list(a[0][:2]) == list(a[-1][:2]) else a
+
+
+def stakeouts(ov: dict, w: int, h: int) -> list:
+    corners = corner_pts(ov)
+    if not corners:
+        return []
+    k = float(ov.get("ft_per_px") or 0)
+    if not k and ov.get("length_ft"):
+        tile = _pts(ov.get("drain_tile"), w, h)
+        px = sum(math.dist(a, b) for a, b in zip(tile, tile[1:]))
+        k = float(ov["length_ft"]) / px if px else 0
+    items = [("Cleanout", c, f"CO-{i + 1}") for i, c in enumerate(ov.get("cleanouts") or [])]
+    sump = ov.get("sump") or {}
+    if sump.get("x") is not None:
+        items.append(("Sump", sump, "SUMP"))
+    items += [("Sump", s, f"SP-{i + 2}") for i, s in enumerate(ov.get("sumps") or [])]
+    cs = [_pt(c, w, h) for c in corners]
+    out = []
+    for kind, it, default in items:
+        try:
+            p = _pt((it["x"], it["y"]), w, h)
+        except (KeyError, TypeError, ValueError):
+            continue
+        j = min(range(len(cs)), key=lambda n: math.dist(p, cs[n]))
+        px = math.dist(p, cs[j])
+        out.append({"kind": kind, "label": it.get("label") or default, "corner": j + 1, "p": p, "c": cs[j],
+                    "ft": round(px * k, 2) if k else None})
+    return out
+
+
+def _draw_stakes(d, ov, w, h, lw, font):
+    for i, c in enumerate(corner_pts(ov)):
+        x, y = _pt(c, w, h)
+        d.ellipse([x - lw * 1.4, y - lw * 1.4, x + lw * 1.4, y + lw * 1.4], fill=STAKE + (255,), outline=(255, 255, 255, 255), width=2)
+        d.text((x + lw * 2, y + lw), f"C{i + 1}", fill=STAKE + (255,), font=font, stroke_width=3, stroke_fill=(255, 255, 255, 255))
+    for s in stakeouts(ov, w, h):
+        _dashed(d, [s["p"], s["c"]], STAKE + (235,), max(lw // 2, 2), lw * 2)
+        if s["ft"] is not None:
+            mx, my = (s["p"][0] + s["c"][0]) / 2, (s["p"][1] + s["c"][1]) / 2
+            d.text((mx, my), fmt_ft(s["ft"]), fill=(255, 255, 255, 255), font=font, anchor="mm", stroke_width=4, stroke_fill=STAKE + (255,))
+
+
+def render_overlay(image: bytes, ov: dict, stake: bool = False) -> bytes:
     img = Image.open(io.BytesIO(image)).convert("RGB")
     w, h = img.size
     layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -118,8 +173,11 @@ def render_overlay(image: bytes, ov: dict) -> bytes:
         d.text((x + r + 4, y - r), sump_text(s, "SUMP"), fill=SUMP + (255,), font=font, stroke_width=3, stroke_fill=(255, 255, 255, 255))
         extra_marks.append((x, y))
 
+    if stake:
+        _draw_stakes(d, ov, w, h, lw, font)
+
     items = [(TILE, f"Drain tile - {ov.get('pipe_spec') or 'perforated pipe'}" + (f" ({ov['length_ft']} LF)" if ov.get("length_ft") else "")),
-             (DISCHARGE, "Discharge / solid outlet"), (CLEANOUT, "Cleanout"), (SUMP, "Sump / pump (dot = pump)"), (SLOPE, "Slope direction")]
+             (DISCHARGE, "Discharge / solid outlet"), (CLEANOUT, "Cleanout"), (SUMP, "Sump / pump (dot = pump)"), (SLOPE, "Slope direction")] + ([(STAKE, "Stake-out: distance to nearest footing corner")] if stake else [])
     pad, row = lw * 3, int(font.size * 1.6)
     box_w = int(max(d.textlength(t, font=font) for _, t in items) + pad * 4 + row)
     box_h = row * len(items) + pad * 2

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { C, PUMPS, pts, clamp, insertVertex, snapPoint, fmtFt } from "@/components/drain/geometry";
+import { C, PUMPS, pts, clamp, insertVertex, snapPoint, fmtFt, corners } from "@/components/drain/geometry";
 
 const label = (x, y, color, text, dx = 14, dy = -8, size = 14) => (
   <text x={x + dx} y={y + dy} fill={color} fontSize={size} fontWeight="700" stroke="#fff" strokeWidth="3" paintOrder="stroke" style={{ pointerEvents: "none" }}>{text}</text>
@@ -34,7 +34,32 @@ const Measures = ({ d, k, aspect, active }) => {
   });
 };
 
-export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, onBegin, setDraft, url, snap, k }) => {
+const STAKE = "#B45309";
+const Stakes = ({ d, rows, aspect, sel }) => (
+  <g style={{ pointerEvents: "none" }} data-testid="layout-stakes">
+    {corners(d).map((p, j) => (
+      <g key={`c-${j}`} data-testid={`layout-corner-${j}`}>
+        <circle cx={p[0]} cy={p[1] * aspect} r="5" fill={STAKE} stroke="#fff" strokeWidth="1.5" />
+        {label(p[0], p[1] * aspect, STAKE, `C${j + 1}`, 8, 16, 12)}
+      </g>
+    ))}
+    {rows.map((r) => {
+      const hot = sel?.kind === r.kind && (r.i === undefined || sel.i === r.i);
+      const mx = (r.x + r.cx) / 2, my = ((r.y + r.cy) / 2) * aspect;
+      const t = r.ft != null ? fmtFt(r.ft) : null;
+      const w = t ? t.length * 7.5 + 10 : 0;
+      return (
+        <g key={`st-${r.kind}-${r.i ?? 0}`} data-testid={`layout-stake-${r.kind}-${r.i ?? 0}`}>
+          <line x1={r.x} y1={r.y * aspect} x2={r.cx} y2={r.cy * aspect} stroke={STAKE} strokeWidth={hot ? 3 : 2} strokeDasharray="5 4" />
+          {t && <rect x={mx - w / 2} y={my - 10} width={w} height="20" rx="4" fill={hot ? "#F59E0B" : STAKE} />}
+          {t && <text x={mx} y={my + 4.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={hot ? "#0B0F17" : "#fff"} fontFamily="JetBrains Mono, monospace">{t}</text>}
+        </g>
+      );
+    })}
+  </g>
+);
+
+export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, onBegin, setDraft, url, snap, k, stakes }) => {
   const svgRef = useRef(null);
   const drag = useRef(null);
   const [hit, setHit] = useState(null);
@@ -144,6 +169,7 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
             ))}
           </g>
         ))}
+        {on.stake && <Stakes d={d} rows={stakes || []} aspect={aspect} sel={sel} />}
         {on.tile && midHandles("drain_tile", C.tile)}
         {on.tile && on.measure && <Measures d={d} k={k} aspect={aspect} active={activeSegs} />}
         {on.tile && vertexHandles("drain_tile", "tile", C.tile)}

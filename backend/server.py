@@ -26,7 +26,7 @@ from PIL import Image, ImageOps  # noqa: E402
 from storage import init_storage, get_object, put_object, APP_NAME  # noqa: E402
 from processing import open_pdf, process_pdf_page, process_image  # noqa: E402
 from ai_engine import index_sheets, analyze_sheet, model_sheet, stream_chat, temp_file, pick_sheets  # noqa: E402
-from overlay import render_overlay  # noqa: E402
+from overlay import render_overlay, stakeouts  # noqa: E402
 from drain_takeoff import derive as derive_takeoff, compute as compute_takeoff, DEFAULTS as TAKEOFF_DEFAULTS  # noqa: E402
 from set_tools import drain_overlay  # noqa: E402
 from report import build_report  # noqa: E402
@@ -390,9 +390,57 @@ async def delete_logo():
     return {"ok": True}
 
 
+async def report_brand(body: ReportIn) -> tuple[dict, bytes | None]:
+    stored = await get_brand()
+    given = body.brand.model_dump(exclude_unset=True) if "brand" in body.model_fields_set else {}
+    if given:
+        await db.settings.update_one({"id": "brand"}, {"$set": given}, upsert=True)
+    logo = await fetch(stored["logo_path"]) if stored.get("logo_path") else None
+    return {**stored, **given}, logo
+
+
+async def drain_images(pid: str, stake: bool = False) -> list:
+    drawn = await db.pages.find({"project_id": pid, "drain_status": "ready"}, PAGE_LIST).sort("index", 1).to_list(20)
+    out = []
+    for pg in drawn:
+        ov = pg["drain_overlay"]
+        if ov.get("is_foundation") is False:
+            continue
+        try:
+            png = await asyncio.to_thread(render_overlay, await fetch(pg["image_path"]), ov, stake)
+            stakes = stakeouts(ov, pg.get("img_w") or 1000, pg.get("img_h") or 1000) if stake else []
+            out.append((sheet_label(pg), png, ov.get("notes") or [], stakes))
+        except Exception:
+            logger.exception("drain overlay render failed")
+    return out
+
+
+def pdf_response(pdf: bytes, name: str, suffix: str) -> Response:
+    fname = re.sub(r"[^A-Za-z0-9_-]+", "_", name)[:60] + f"_{suffix}.pdf"
+    return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+async def drainage_report(p: dict, body: ReportIn) -> Response:
+    tools = p.get("tools") or {}
+    imgs = await drain_images(p["id"], stake=True)
+    if not imgs:
+        raise HTTPException(400, "Draw the drain tile layout on the foundation sheet first")
+    extras = {"crew": "drainage", "drain_images": imgs}
+    tk = await drain_takeoff_for(p, None)
+    if tk:
+        extras["drain_takeoff"] = tk[1]
+    if (tools.get("drainage") or {}).get("status") == "ready":
+        extras["drain"] = tools["drainage"]["data"]
+    brand, logo = await report_brand(body)
+    pdf = await asyncio.to_thread(build_report, p, [], {}, brand, logo, [], extras)
+    return pdf_response(pdf, p["name"], "drainage_report")
+
+
 @api.post("/projects/{pid}/report")
 async def report(pid: str, body: ReportIn):
     p = await get_project(pid)
+    if body.crew == "drainage":
+        return await drainage_report(p, body)
     tools = p.get("tools") or {}
     q = {"project_id": pid, "status": "ready", "analysis": {"$ne": None}}
     packet = None
@@ -409,12 +457,7 @@ async def report(pid: str, body: ReportIn):
     pages = await db.pages.find(q, PAGE_LIST).sort("index", 1).to_list(2000)
     if not pages and not packet:
         raise HTTPException(400, "No scanned sheets yet — scan the set first")
-    stored = await get_brand()
-    given = body.brand.model_dump(exclude_unset=True) if "brand" in body.model_fields_set else {}
-    brand = {**stored, **given}
-    if given:
-        await db.settings.update_one({"id": "brand"}, {"$set": given}, upsert=True)
-    logo = await fetch(stored["logo_path"]) if stored.get("logo_path") else None
+    brand, logo = await report_brand(body)
     images = {pg["index"]: await fetch(pg["image_path"]) for pg in pages} if body.include_images else {}
     qa = []
     if body.include_qa and body.crew == "full":
@@ -431,21 +474,9 @@ async def report(pid: str, body: ReportIn):
             extras["drain_takeoff"] = tk[1]
     if body.crew in ("full", "foundation", "waterproofing") and (tools.get("drainage") or {}).get("status") == "ready":
         extras["drain"] = tools["drainage"]["data"]
-        drawn = await db.pages.find({"project_id": pid, "drain_status": "ready"}, PAGE_LIST).sort("index", 1).to_list(20)
-        extras["drain_images"] = []
-        for pg in drawn:
-            if pg["drain_overlay"].get("is_foundation") is False:
-                continue
-            try:
-                png = await asyncio.to_thread(render_overlay, await fetch(pg["image_path"]), pg["drain_overlay"])
-                extras["drain_images"].append((sheet_label(pg), png, pg["drain_overlay"].get("notes") or []))
-            except Exception:
-                logger.exception("drain overlay render failed")
+        extras["drain_images"] = await drain_images(pid)
     pdf = await asyncio.to_thread(build_report, p, pages, images, brand, logo, qa, extras)
-    suffix = "takeoff_report" if body.crew == "full" else f"{body.crew}_crew_packet"
-    fname = re.sub(r"[^A-Za-z0-9_-]+", "_", p["name"])[:60] + f"_{suffix}.pdf"
-    return Response(content=pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+    return pdf_response(pdf, p["name"], "takeoff_report" if body.crew == "full" else f"{body.crew}_crew_packet")
 
 
 def set_context(pages: list) -> str:

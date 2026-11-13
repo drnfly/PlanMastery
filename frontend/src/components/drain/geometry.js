@@ -160,3 +160,22 @@ export function snapPoint(d, kind, x, y, aspect, self, tol = 14) {
   }
   return best ? [best[0], best[1], best] : [x, y, null];
 }
+
+export const corners = (d) => uniq(d.footprint);
+
+// Straight-line distance from each cleanout / sump to its nearest footing corner
+export function stakeouts(d, k, aspect) {
+  const cs = corners(d);
+  if (!cs.length) return [];
+  const items = [
+    ...(d.cleanouts || []).map((c, i) => ({ kind: "cleanout", i, type: "Cleanout", label: c.label || `CO-${i + 1}`, x: c.x, y: c.y })),
+    ...(d.sump?.x != null ? [{ kind: "sump", type: "Sump", label: d.sump.label || "SUMP", x: d.sump.x, y: d.sump.y }] : []),
+    ...(d.sumps || []).map((s, i) => ({ kind: "xsump", i, type: "Sump", label: s.label || `SP-${i + 2}`, x: s.x, y: s.y })),
+  ];
+  return items.map((it) => {
+    let best = 0;
+    let bd = Infinity;
+    cs.forEach((p, j) => { const dd = Math.hypot(p[0] - it.x, (p[1] - it.y) * aspect); if (dd < bd) { bd = dd; best = j; } });
+    return { ...it, corner: best, cx: cs[best][0], cy: cs[best][1], ft: k ? bd * k : null };
+  });
+}
