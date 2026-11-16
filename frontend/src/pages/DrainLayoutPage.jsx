@@ -2,15 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowLeft, Download, Loader2, PenLine, Save, Undo2, Ruler, Wand2, Trash2 } from "lucide-react";
-import { getProject, fetchPageImage, startDrainOverlay, editDrainOverlay, fetchDrainPng, deleteDrainOverlay } from "@/lib/api";
+import { getProject, fetchPageImage, startDrainOverlay, editDrainOverlay, fetchDrainPng, deleteDrainOverlay, drainRules, startDrainCheck } from "@/lib/api";
 import { LayoutCanvas } from "@/components/drain/LayoutCanvas";
 import { ToolPalette } from "@/components/drain/ToolPalette";
 import { Inspector } from "@/components/drain/Inspector";
+import { LayoutChecks } from "@/components/drain/LayoutChecks";
 import { StakeoutList } from "@/components/drain/StakeoutList";
 import { DrainTakeoff } from "@/components/app/DrainTakeoff";
 import { addAt, moveSel, removeSel, clone, toBody, ftPerUnit, tileFt, fmtFt, svgLen, stakeouts, corners } from "@/components/drain/geometry";
 
-const LAYERS = [["tile", "Drain tile"], ["measure", "Lengths"], ["stake", "Stake-out"], ["foot", "Footing outline"], ["cleanouts", "Cleanouts"], ["sump", "Sumps & discharge"], ["slope", "Slope arrows"]];
+const LAYERS = [["tile", "Drain tile"], ["measure", "Lengths"], ["stake", "Stake-out"], ["offsets", "Wall offsets"], ["flags", "Problem flags"], ["foot", "Footing outline"], ["cleanouts", "Cleanouts"], ["sump", "Sumps & discharge"], ["slope", "Slope arrows"]];
 const BLANK = { is_foundation: true, footprint: [], drain_tile: [], sump: null, sumps: [], cleanouts: [], discharge: null, slope_arrows: [], pipe_spec: "4\" perforated pipe in washed stone", length_ft: 0 };
 const pickFoundation = (pages) => (pages.find((p) => p.drain_status === "ready" && p.drain_overlay?.is_foundation !== false)
   || pages.find((p) => /foundation/i.test(`${p.title} ${p.sheet_number}`)) || pages[0]).index;
@@ -26,7 +27,7 @@ export default function DrainLayoutPage() {
   const [hist, setHist] = useState([]);
   const [sel, setSel] = useState(null);
   const [tool, setTool] = useState("select");
-  const [on, setOn] = useState({ tile: true, measure: true, stake: true, foot: true, cleanouts: true, sump: true, slope: true });
+  const [on, setOn] = useState({ tile: true, measure: true, stake: true, offsets: true, flags: true, foot: true, cleanouts: true, sump: true, slope: true });
   const [snap, setSnap] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -39,6 +40,25 @@ export default function DrainLayoutPage() {
   const dirty = !!draft && JSON.stringify(toBody(draft)) !== JSON.stringify(toBody(saved || BLANK)) || !!draft?._length_set;
   const k = ftPerUnit(saved, draft, page, aspect);
   const liveFt = draft && k ? tileFt(draft, k, aspect) : 0;
+  const [issues, setIssues] = useState([]);
+  const [checking, setChecking] = useState(false);
+  const check = page?.drain_check || null;
+  const checkStale = !!check && check.status === "ready" && (dirty || (check.layout_at || null) !== (saved?.edited_at || null));
+  const rulesKey = draft ? JSON.stringify([toBody(draft), k]) : "";
+  useEffect(() => {
+    if (!rulesKey || idx == null) { setIssues([]); return undefined; }
+    setChecking(true);
+    const t = setTimeout(() => {
+      const [body, kk] = JSON.parse(rulesKey);
+      drainRules(pid, idx, { ...body, ft_per_px: kk ? (kk * 1000) / (page?.img_w || 1000) : 0 })
+        .then(setIssues).catch(() => {}).finally(() => setChecking(false));
+    }, 350);
+    return () => clearTimeout(t);
+  }, [rulesKey, pid, idx]); // eslint-disable-line react-hooks/exhaustive-deps
+  const runAiCheck = async () => {
+    try { await startDrainCheck(pid, idx); toast.info("AI is checking the layout against the plans…"); load(); }
+    catch (e) { toast.error(e.response?.data?.detail || "Could not start the check"); }
+  };
   const stakes = useMemo(() => (draft ? stakeouts(draft, k, aspect) : []), [draft, k, aspect]);
 
   useEffect(() => { setDraft(saved ? clone(saved) : null); setHist([]); setSel(null); }, [idx, saved?.edited_at, saved?.edited, status]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -50,10 +70,10 @@ export default function DrainLayoutPage() {
     return () => u && URL.revokeObjectURL(u);
   }, [pid, idx]);
   useEffect(() => {
-    if (status !== "generating") return undefined;
+    if (status !== "generating" && check?.status !== "running") return undefined;
     const t = setInterval(load, 3000);
     return () => clearInterval(t);
-  }, [status, load]);
+  }, [status, check?.status, load]);
 
   const begin = useCallback(() => setHist((h) => [...h.slice(-40), draft]), [draft]);
   const apply = (next) => { begin(); setDraft(next); };
@@ -163,7 +183,7 @@ export default function DrainLayoutPage() {
           <div className="bg-white rounded-xl overflow-x-auto border border-slate-800" data-testid="layout-scroll">
             {!url && <div className="h-96 bg-[#111827] flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-cyan-400" /></div>}
             {url && draft && (
-              <LayoutCanvas d={draft} aspect={aspect} on={on} tool={tool} sel={sel} setSel={setSel} url={url} onBegin={begin} setDraft={setDraft} snap={snap} k={k} stakes={stakes}
+              <LayoutCanvas d={draft} aspect={aspect} on={on} tool={tool} sel={sel} setSel={setSel} url={url} onBegin={begin} setDraft={setDraft} snap={snap} k={k} stakes={stakes} flags={issues}
                 onAdd={(t, x, y) => { const [o, s] = addAt(draft, t, x, y); apply(o); setSel(s); }}
                 onMove={(s, x, y, start) => setDraft((d) => moveSel(d, s, x, y, start))} />
             )}
@@ -180,6 +200,7 @@ export default function DrainLayoutPage() {
                 </p>
                 {dirty && <p className="text-amber-300" data-testid="layout-unsaved">Unsaved changes — save to update the takeoff, PNG and reports.</p>}
               </div>
+              <LayoutChecks issues={issues} loading={checking} setSel={setSel} check={check} stale={checkStale} dirty={dirty} onRunAi={runAiCheck} />
               <StakeoutList rows={stakes} sel={sel} setSel={setSel} hasCorners={corners(draft).length > 0} />
             </div>
           )}

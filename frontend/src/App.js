@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "sonner";
 import Workspace from "@/pages/Workspace";
 import DrainLayoutPage from "@/pages/DrainLayoutPage";
+import SupplyPage from "@/pages/SupplyPage";
 
 function App() {
   return (
@@ -11,6 +12,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Workspace />} />
           <Route path="/drain/:pid" element={<DrainLayoutPage />} />
+          <Route path="/suppliers/:pid" element={<SupplyPage />} />
         </Routes>
       </BrowserRouter>
       <Toaster theme="dark" position="bottom-right" richColors />

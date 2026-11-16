@@ -176,6 +176,35 @@ export function stakeouts(d, k, aspect) {
     let best = 0;
     let bd = Infinity;
     cs.forEach((p, j) => { const dd = Math.hypot(p[0] - it.x, (p[1] - it.y) * aspect); if (dd < bd) { bd = dd; best = j; } });
-    return { ...it, corner: best, cx: cs[best][0], cy: cs[best][1], ft: k ? bd * k : null };
+    return { ...it, corner: best, cx: cs[best][0], cy: cs[best][1], ft: k ? bd * k : null, ...wallOffsets(it, cs, best, k, aspect) };
   });
 }
+
+// Offsets measured along the two walls meeting at corner j (a toward next corner, b square to it toward previous corner)
+function wallOffsets(p, cs, j, k, aspect) {
+  const n = cs.length;
+  if (n < 3) return {};
+  const c = [cs[j][0], cs[j][1] * aspect];
+  const nx_ = (j + 1) % n, pv = (j - 1 + n) % n;
+  let ux = cs[nx_][0] - c[0], uy = cs[nx_][1] * aspect - c[1];
+  const L = Math.hypot(ux, uy);
+  if (!L) return {};
+  ux /= L; uy /= L;
+  let nx = -uy, ny = ux;
+  if (nx * (cs[pv][0] - c[0]) + ny * (cs[pv][1] * aspect - c[1]) < 0) { nx = -nx; ny = -ny; }
+  const dx = p.x - c[0], dy = p.y * aspect - c[1];
+  const a = dx * ux + dy * uy, b = dx * nx + dy * ny;
+  return { aTo: nx_, bTo: pv, aFt: k ? a * k : null, bFt: k ? b * k : null, fx: c[0] + ux * a, fy: (c[1] + uy * a) / aspect };
+}
+
+export const sfmt = (f) => (f < 0 ? "-" : "") + fmtFt(Math.abs(f));
+
+export const flagPos = (d, f) => {
+  const pick = { cleanout: () => d.cleanouts?.[f.i], sump: () => d.sump, xsump: () => d.sumps?.[f.i] }[f.kind];
+  if (pick) { const it = pick(); return it?.x != null ? [it.x, it.y] : null; }
+  if (f.kind === "xoutlet") return d.sumps?.[f.i]?.outlet || null;
+  if (f.kind === "dpt") return d.discharge?.points?.[f.i] || null;
+  if (f.kind === "tile") return d.drain_tile?.[f.i] || null;
+  return null;
+};
+export const flagSel = (f) => (["dpt", "tile"].includes(f.kind) ? { kind: f.kind, v: f.i } : f.kind ? { kind: f.kind, ...(f.i != null && { i: f.i }) } : null);

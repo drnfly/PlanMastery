@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { C, PUMPS, pts, clamp, insertVertex, snapPoint, fmtFt, corners } from "@/components/drain/geometry";
+import { C, PUMPS, pts, clamp, insertVertex, snapPoint, fmtFt, corners, sfmt, flagPos } from "@/components/drain/geometry";
 
 const label = (x, y, color, text, dx = 14, dy = -8, size = 14) => (
   <text x={x + dx} y={y + dy} fill={color} fontSize={size} fontWeight="700" stroke="#fff" strokeWidth="3" paintOrder="stroke" style={{ pointerEvents: "none" }}>{text}</text>
@@ -35,7 +35,46 @@ const Measures = ({ d, k, aspect, active }) => {
 };
 
 const STAKE = "#B45309";
-const Stakes = ({ d, rows, aspect, sel }) => (
+const TEAL = "#0D9488";
+const Pill = ({ x, y, text, fill, color = "#fff" }) => {
+  const w = text.length * 7 + 10;
+  return (
+    <g>
+      <rect x={x - w / 2} y={y - 9} width={w} height="18" rx="4" fill={fill} />
+      <text x={x} y={y + 4} textAnchor="middle" fontSize="11" fontWeight="700" fill={color} fontFamily="JetBrains Mono, monospace">{text}</text>
+    </g>
+  );
+};
+const Offsets = ({ r, aspect, hot }) => {
+  if (r.fx == null) return null;
+  const c = [r.cx, r.cy * aspect], f = [r.fx, r.fy * aspect], p = [r.x, r.y * aspect];
+  const seg = (a, b, v, key) => (
+    <g key={key} data-testid={`layout-offset-${key}-${r.kind}-${r.i ?? 0}`}>
+      <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke={TEAL} strokeWidth={hot ? 2.5 : 1.5} strokeDasharray="3 3" />
+      {v != null && Math.hypot(b[0] - a[0], b[1] - a[1]) > 14 && <Pill x={(a[0] + b[0]) / 2} y={(a[1] + b[1]) / 2} text={sfmt(v)} fill={hot ? "#5EEAD4" : TEAL} color={hot ? "#0B0F17" : "#fff"} />}
+    </g>
+  );
+  return <>{seg(c, f, r.aFt, "a")}{seg(f, p, r.bFt, "b")}</>;
+};
+
+export const Flags = ({ d, flags, aspect }) => (
+  <g style={{ pointerEvents: "none" }} data-testid="layout-flags">
+    {flags.map((f, n) => {
+      const p = flagPos(d, f);
+      if (!p) return null;
+      const err = f.severity === "error";
+      return (
+        <g key={`fl-${n}`} data-testid={`layout-flag-${f.kind}-${f.i ?? 0}`}>
+          <circle cx={p[0]} cy={p[1] * aspect} r="30" fill="none" stroke={err ? "#DC2626" : "#F59E0B"} strokeWidth="3" strokeDasharray="6 4" className="animate-pulse" />
+          <circle cx={p[0] - 22} cy={p[1] * aspect - 22} r="10" fill={err ? "#DC2626" : "#F59E0B"} stroke="#fff" strokeWidth="2" />
+          <text x={p[0] - 22} y={p[1] * aspect - 17.5} textAnchor="middle" fontSize="13" fontWeight="800" fill="#fff">!</text>
+        </g>
+      );
+    })}
+  </g>
+);
+
+const Stakes = ({ d, rows, aspect, sel, offsets }) => (
   <g style={{ pointerEvents: "none" }} data-testid="layout-stakes">
     {corners(d).map((p, j) => (
       <g key={`c-${j}`} data-testid={`layout-corner-${j}`}>
@@ -50,6 +89,7 @@ const Stakes = ({ d, rows, aspect, sel }) => (
       const w = t ? t.length * 7.5 + 10 : 0;
       return (
         <g key={`st-${r.kind}-${r.i ?? 0}`} data-testid={`layout-stake-${r.kind}-${r.i ?? 0}`}>
+          {offsets && <Offsets r={r} aspect={aspect} hot={hot} />}
           <line x1={r.x} y1={r.y * aspect} x2={r.cx} y2={r.cy * aspect} stroke={STAKE} strokeWidth={hot ? 3 : 2} strokeDasharray="5 4" />
           {t && <rect x={mx - w / 2} y={my - 10} width={w} height="20" rx="4" fill={hot ? "#F59E0B" : STAKE} />}
           {t && <text x={mx} y={my + 4.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={hot ? "#0B0F17" : "#fff"} fontFamily="JetBrains Mono, monospace">{t}</text>}
@@ -59,7 +99,7 @@ const Stakes = ({ d, rows, aspect, sel }) => (
   </g>
 );
 
-export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, onBegin, setDraft, url, snap, k, stakes }) => {
+export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, onBegin, setDraft, url, snap, k, stakes, flags }) => {
   const svgRef = useRef(null);
   const drag = useRef(null);
   const [hit, setHit] = useState(null);
@@ -169,7 +209,7 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
             ))}
           </g>
         ))}
-        {on.stake && <Stakes d={d} rows={stakes || []} aspect={aspect} sel={sel} />}
+        {on.stake && <Stakes d={d} rows={stakes || []} aspect={aspect} sel={sel} offsets={on.offsets} />}
         {on.tile && midHandles("drain_tile", C.tile)}
         {on.tile && on.measure && <Measures d={d} k={k} aspect={aspect} active={activeSegs} />}
         {on.tile && vertexHandles("drain_tile", "tile", C.tile)}
@@ -213,6 +253,7 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
             )}
           </g>
         ))}
+        {on.flags && <Flags d={d} flags={(flags || []).filter((f) => f.severity !== "info")} aspect={aspect} />}
         {hit && (
           <g data-testid="layout-snap-indicator" style={{ pointerEvents: "none" }}>
             <circle cx={hit[0]} cy={sy(hit[1])} r="20" fill="none" stroke="#F59E0B" strokeWidth="3" />

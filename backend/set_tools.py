@@ -144,3 +144,37 @@ If the sheet shows no foundation or floor plan outline, set "is_foundation": fal
 async def drain_overlay(image_path: str, sheet: str, context: str) -> dict:
     mime = "image/jpeg" if image_path.lower().endswith((".jpg", ".jpeg")) else "image/webp" if image_path.lower().endswith(".webp") else "image/png"
     return _parse(await _collect(EXPERT, DRAIN_OVERLAY_PROMPT.format(sheet=sheet, context=context), [(image_path, mime)]))
+
+
+DRAIN_CHECK_PROMPT = """The attached image is construction sheet {sheet} with a FOUNDATION DRAIN TILE layout drawn on top of it
+(blue = perforated drain tile, cyan dashed = footing outline, orange dots = cleanouts, red squares = sumps/pumps (white dot = pump),
+green dashed = discharge, magenta = slope arrows, brown dashed = stake-out lines to footing corners C1..Cn).
+The crew may have MOVED items the AI originally placed from the plans or ADDED new ones. Decide whether this layout will work
+based on what the plans show (sheet notes, details, grades, footings, column pads, piers, utilities, window wells, egress, property
+lines, specified sump/outlet locations, drainage specs) and good practice / IRC R405.
+
+Field changes vs the AI layout taken from the plans:
+{changes}
+
+Automatic geometry checks already found:
+{rules}
+
+Project drainage plan (from the whole set):
+{context}
+
+Sheet transcription:
+{digest}
+
+Return ONLY valid JSON (no markdown fences):
+{{
+  "verdict": "works | works_with_changes | wont_work",
+  "summary": "1-2 sentences for the crew",
+  "issues": [{{"severity": "error | warning | info", "item": "label e.g. CO-2, SUMP, Drain tile", "problem": "what is wrong",
+              "why": "why it won't work, citing what the plans show (sheet/detail/note)", "fix": "what to do"}}]
+}}
+Only report real problems tied to the plans or the rules; do not repeat geometry checks unless the plans add something. Empty issues if it works."""
+
+
+async def drain_check(image_path: str, sheet: str, changes: str, rules: str, context: str, digest: str) -> dict:
+    return _parse(await _collect(EXPERT, DRAIN_CHECK_PROMPT.format(sheet=sheet, changes=changes, rules=rules, context=context, digest=digest),
+                                 [(image_path, "image/png")]))

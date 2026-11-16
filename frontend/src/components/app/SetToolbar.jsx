@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { ScanSearch, FileDown, Loader2 } from "lucide-react";
+import { ScanSearch, FileDown, Loader2, Store } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { scanSet } from "@/lib/api";
 import { ReportDialog } from "@/components/app/ReportDialog";
 
 export const SetToolbar = ({ project, onChange }) => {
   const [open, setOpen] = useState(false);
+  const nav = useNavigate();
   const pages = project.pages;
   const scanned = pages.filter((pg) => pg.status === "ready" && pg.analysis).length;
   const deep = pages.filter((pg) => pg.analysis?.digest).length;
@@ -33,6 +35,10 @@ export const SetToolbar = ({ project, onChange }) => {
         className="flex items-center gap-2 rounded-md border border-cyan-500/50 text-cyan-300 px-3 py-2 text-sm hover:bg-cyan-500/10 disabled:opacity-40 transition-colors">
         {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
         {deep === pages.length ? "Set fully scanned" : running ? "Scanning…" : pages.length > 1 ? "Scan entire set" : "Deep scan sheet"}
+      </button>
+      <button data-testid="open-suppliers-button" onClick={() => nav(`/suppliers/${project.id}`)}
+        className="flex items-center gap-2 rounded-md border border-slate-600 text-slate-200 px-3 py-2 text-sm hover:bg-slate-800 transition-colors">
+        <Store className="h-4 w-4" /> Suppliers
       </button>
       <button data-testid="open-report-dialog-button" onClick={() => setOpen(true)} disabled={!scanned && !pages.some((pg) => pg.drain_status === "ready")}
         className="flex items-center gap-2 rounded-md bg-amber-500 text-[#0B0F17] font-semibold px-3 py-2 text-sm hover:bg-amber-400 disabled:opacity-40 active:scale-95 transition-[background-color,transform]">

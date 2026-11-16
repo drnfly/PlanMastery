@@ -28,7 +28,9 @@ from processing import open_pdf, process_pdf_page, process_image  # noqa: E402
 from ai_engine import index_sheets, analyze_sheet, model_sheet, stream_chat, temp_file, pick_sheets  # noqa: E402
 from overlay import render_overlay, stakeouts  # noqa: E402
 from drain_takeoff import derive as derive_takeoff, compute as compute_takeoff, DEFAULTS as TAKEOFF_DEFAULTS  # noqa: E402
-from set_tools import drain_overlay  # noqa: E402
+from set_tools import drain_overlay, drain_check  # noqa: E402
+from drain_rules import check_layout  # noqa: E402
+import supply as sup  # noqa: E402
 from report import build_report  # noqa: E402
 from icf_calc import compute as icf_compute  # noqa: E402
 from set_tools import ICF_PROMPT, WP_PROMPT, DRAIN_PROMPT, CREWS, set_json, crew_prompt, analyze_photo, photo_followup  # noqa: E402
@@ -208,13 +210,39 @@ async def run_analysis(pid: str, idx: int):
         await set_page(pid, idx, {"status": "failed", "error": str(e)[:300]})
 
 
+def drain_ctx(p: dict) -> str:
+    dr = ((p.get("tools") or {}).get("drainage") or {}).get("data") or {}
+    return json.dumps({"strategy": dr.get("strategy"), "items": [{k: i.get(k) for k in ("item", "status", "spec", "quantity", "recommendation")}
+                                                                 for i in dr.get("items", [])]})[:12000] if dr else "(no drainage plan yet)"
+
+
+def rule_lines(issues: list) -> str:
+    return "\n".join(f"- [{i['severity']}] {i['item']}: {i['problem']}" for i in issues) or "(none)"
+
+
+async def run_drain_check(pid: str, idx: int):
+    pg = await get_page(pid, idx, PAGE_LIST)
+    ov = pg["drain_overlay"]
+    try:
+        w, h = pg.get("img_w") or 1000, pg.get("img_h") or 1000
+        rules = check_layout(ov, w, h)
+        changes = rule_lines([i for i in rules if i["severity"] == "info"]) if not ov.get("manual") else "(layout drawn manually by the crew)"
+        png = await asyncio.to_thread(render_overlay, await fetch(pg["image_path"]), ov, True)
+        digest = ((pg.get("analysis") or {}).get("digest") or "")[:12000] or "(sheet not scanned)"
+        with temp_file(png, "png") as path:
+            res = await drain_check(path, sheet_label(pg), changes, rule_lines([i for i in rules if i["severity"] != "info"]),
+                                    drain_ctx(await db.projects.find_one({"id": pid}, NO_ID)), digest)
+        res["issues"] = [i for i in res.get("issues") or [] if isinstance(i, dict)]
+        await set_page(pid, idx, {"drain_check": {"status": "ready", "result": res, "layout_at": ov.get("edited_at"), "checked_at": now()}})
+    except Exception as e:
+        logger.exception("drain check failed")
+        await set_page(pid, idx, {"drain_check": {"status": "failed", "error": str(e)[:300], "layout_at": ov.get("edited_at")}})
+
+
 async def run_drain(pid: str, idx: int):
     pg = await get_page(pid, idx)
     try:
-        p = await db.projects.find_one({"id": pid}, NO_ID)
-        dr = ((p.get("tools") or {}).get("drainage") or {}).get("data") or {}
-        ctx = json.dumps({"strategy": dr.get("strategy"), "items": [{k: i.get(k) for k in ("item", "status", "spec", "quantity", "recommendation")}
-                                                                     for i in dr.get("items", [])]})[:12000] if dr else "(no drainage plan yet)"
+        ctx = drain_ctx(await db.projects.find_one({"id": pid}, NO_ID))
         data = await fetch(pg["image_path"])
         with temp_file(data, pg["image_path"].rsplit(".", 1)[-1]) as path:
             result = await drain_overlay(path, sheet_label(pg), ctx)
@@ -411,7 +439,12 @@ async def drain_images(pid: str, stake: bool = False) -> list:
             png = await asyncio.to_thread(render_overlay, img, ov)
             if stake:
                 png = [png, await asyncio.to_thread(render_overlay, img, ov, True, True)]
-            stakes = stakeouts(ov, pg.get("img_w") or 1000, pg.get("img_h") or 1000) if stake else []
+            w, h = pg.get("img_w") or 1000, pg.get("img_h") or 1000
+            stakes = stakeouts(ov, w, h) if stake else []
+            if stake:
+                chk = pg.get("drain_check") or {}
+                ai = {**chk["result"], "stale": chk.get("layout_at") != ov.get("edited_at")} if chk.get("status") == "ready" else None
+                stakes = {"rows": stakes, "rules": check_layout(ov, w, h), "ai": ai}
             out.append((sheet_label(pg), png, ov.get("notes") or [], stakes))
         except Exception:
             logger.exception("drain overlay render failed")
@@ -799,10 +832,36 @@ async def edit_drain(pid: str, idx: int, body: DrainEdit):
     return ov
 
 
+class DrainRulesIn(DrainEdit):
+    ft_per_px: float | None = Field(None, ge=0, allow_inf_nan=False)
+
+
+@api.post("/projects/{pid}/pages/{idx}/drain-rules")
+async def drain_rules(pid: str, idx: int, body: DrainRulesIn):
+    pg = await get_page(pid, idx, PAGE_LIST)
+    saved = pg.get("drain_overlay") if pg.get("drain_status") == "ready" else None
+    ov = body.model_dump(exclude={"reset", "ft_per_px"})
+    ov["ai_original"] = (saved or {}).get("ai_original") or ({k: saved.get(k) for k in EDIT_KEYS} if saved and not saved.get("manual") else None)
+    ov["manual"] = (saved or {}).get("manual") or not saved
+    return {"issues": check_layout(ov, pg.get("img_w") or 1000, pg.get("img_h") or 1000, body.ft_per_px)}
+
+
+@api.post("/projects/{pid}/pages/{idx}/drain-check")
+async def start_drain_check(pid: str, idx: int, background: BackgroundTasks):
+    pg = await get_page(pid, idx, PAGE_LIST)
+    if pg.get("drain_status") != "ready" or pg["drain_overlay"].get("is_foundation") is False:
+        raise HTTPException(400, "Save the drain tile layout first")
+    if (pg.get("drain_check") or {}).get("status") == "running":
+        raise HTTPException(409, "Already checking")
+    await set_page(pid, idx, {"drain_check": {"status": "running", "layout_at": pg["drain_overlay"].get("edited_at")}})
+    background.add_task(run_drain_check, pid, idx)
+    return {"status": "running"}
+
+
 @api.delete("/projects/{pid}/pages/{idx}/drain-overlay")
 async def delete_drain(pid: str, idx: int):
     await get_page(pid, idx)
-    await set_page(pid, idx, {"drain_status": "none", "drain_overlay": None, "drain_error": None})
+    await set_page(pid, idx, {"drain_status": "none", "drain_overlay": None, "drain_error": None, "drain_check": None})
     return {"ok": True}
 
 
@@ -1019,6 +1078,155 @@ async def migrate_legacy():
 
 
 
+class SupplySearchIn(BaseModel):
+    address: str = Field(..., min_length=3, max_length=300)
+    radius_mi: float = Field(25, ge=1, le=100)
+
+
+class SupplyItemIn(BaseModel):
+    key: str = Field(..., max_length=40)
+    qty: float | None = Field(None, ge=0, le=1e6, allow_inf_nan=False)
+    on: bool | None = None
+
+
+class SupplyQuoteIn(BaseModel):
+    supplier_id: str = Field(..., max_length=40)
+    item_key: str = Field(..., max_length=40)
+    price: float | None = Field(None, gt=0, le=1e6, allow_inf_nan=False)
+
+
+class SupplierIn(BaseModel):
+    name: str = Field(..., min_length=2, max_length=120)
+    category: str
+    address: str = Field(..., min_length=3, max_length=300)
+    phone: str = Field("", max_length=40)
+
+
+async def get_supply(pid: str) -> dict:
+    doc = await db.supply.find_one({"project_id": pid}, NO_ID)
+    if not doc:
+        raise HTTPException(404, "Search for suppliers first")
+    return doc
+
+
+async def run_pricing(pid: str):
+    doc = await db.supply.find_one({"project_id": pid}, NO_ID)
+    try:
+        res = await sup.estimate_prices(doc.get("place"), doc["suppliers"], doc["items"])
+        await db.supply.update_one({"project_id": pid}, {"$set": {**res, "price_status": "ready", "price_error": None, "priced_at": now()}})
+    except Exception as e:
+        logger.exception("pricing failed")
+        await db.supply.update_one({"project_id": pid}, {"$set": {"price_status": "failed", "price_error": str(e)[:300]}})
+
+
+@api.get("/projects/{pid}/supply")
+async def supply_get(pid: str):
+    await get_project(pid)
+    return await db.supply.find_one({"project_id": pid}, NO_ID) or {}
+
+
+@api.post("/projects/{pid}/supply/search")
+async def supply_search(pid: str, body: SupplySearchIn, background: BackgroundTasks):
+    p = await get_project(pid)
+    try:
+        geo = await sup.geocode(body.address)
+    except Exception:
+        raise HTTPException(502, "Address lookup is unavailable right now — try again shortly")
+    if not geo:
+        raise HTTPException(404, "Couldn't find that address — try adding the city and state")
+    old = await db.supply.find_one({"project_id": pid}, NO_ID) or {}
+    doc = {"project_id": pid, "address": body.address, "radius_mi": body.radius_mi, "lat": geo["lat"], "lon": geo["lon"],
+           "place": geo["place"], "display": geo["display"], "suppliers": [s for s in old.get("suppliers", []) if s.get("source") == "Added by you"],
+           "items": old.get("items", []), "estimates": {}, "quotes": old.get("quotes", {}), "notes": "", "status": "searching",
+           "price_status": None, "price_error": None, "error": None, "searched_at": now()}
+    await db.supply.replace_one({"project_id": pid}, doc, upsert=True)
+    background.add_task(run_supply_search, pid)
+    return doc
+
+
+async def run_supply_search(pid: str):
+    doc = await db.supply.find_one({"project_id": pid}, NO_ID)
+    p = await db.projects.find_one({"id": pid}, NO_ID)
+    try:
+        found = await sup.find_suppliers(doc["lat"], doc["lon"], doc["radius_mi"])
+    except Exception:
+        logger.exception("supplier search failed")
+        await db.supply.update_one({"project_id": pid}, {"$set": {"status": "failed", "error": "Supplier search is unavailable right now — try again shortly"}})
+        return
+    tk = await drain_takeoff_for(p, None)
+    wp = ((p.get("tools") or {}).get("waterproofing") or {}).get("data")
+    custom = doc["suppliers"]
+    for s in custom:
+        s["distance_mi"] = round(sup.haversine_mi((doc["lat"], doc["lon"]), (s["lat"], s["lon"])), 1)
+    items = sup.build_items(tk[1] if tk else None, wp)
+    prev = {i["key"]: i for i in doc.get("items", [])}
+    for i in items:
+        if i["key"] in prev and prev[i["key"]].get("edited"):
+            i.update(qty=prev[i["key"]]["qty"], on=prev[i["key"]]["on"], edited=True)
+    await db.supply.update_one({"project_id": pid}, {"$set": {"suppliers": custom + found, "items": items, "status": "ready",
+                                                                "price_status": "running", "has_takeoff": bool(tk)}})
+    await run_pricing(pid)
+
+
+@api.post("/projects/{pid}/supply/reprice")
+async def supply_reprice(pid: str, background: BackgroundTasks):
+    doc = await get_supply(pid)
+    if doc.get("price_status") == "running":
+        raise HTTPException(409, "Already pricing")
+    await db.supply.update_one({"project_id": pid}, {"$set": {"price_status": "running"}})
+    background.add_task(run_pricing, pid)
+    return {"price_status": "running"}
+
+
+@api.put("/projects/{pid}/supply/item")
+async def supply_item(pid: str, body: SupplyItemIn):
+    doc = await get_supply(pid)
+    keys = [i["key"] for i in doc["items"]]
+    if body.key not in keys:
+        raise HTTPException(404, "Unknown item")
+    n = keys.index(body.key)
+    upd = {f"items.{n}.edited": True}
+    if body.qty is not None:
+        upd[f"items.{n}.qty"] = body.qty
+    if body.on is not None:
+        upd[f"items.{n}.on"] = body.on
+    await db.supply.update_one({"project_id": pid}, {"$set": upd})
+    return {"ok": True}
+
+
+@api.put("/projects/{pid}/supply/quote")
+async def supply_quote(pid: str, body: SupplyQuoteIn):
+    doc = await get_supply(pid)
+    if body.supplier_id not in {s["id"] for s in doc["suppliers"]} or body.item_key not in {i["key"] for i in doc["items"]}:
+        raise HTTPException(404, "Unknown supplier or item")
+    path = f"quotes.{body.supplier_id}.{body.item_key}"
+    op = {"$set": {path: body.price}} if body.price is not None else {"$unset": {path: ""}}
+    await db.supply.update_one({"project_id": pid}, op)
+    return {"ok": True}
+
+
+@api.post("/projects/{pid}/supply/supplier")
+async def supply_add(pid: str, body: SupplierIn):
+    doc = await get_supply(pid)
+    if body.category not in sup.CATS:
+        raise HTTPException(400, "Unknown supplier type")
+    geo = await sup.geocode(body.address)
+    if not geo:
+        raise HTTPException(404, "Couldn't find that address")
+    s = {"id": f"u{uuid.uuid4().hex[:10]}", "name": body.name, "category": body.category, "lat": geo["lat"], "lon": geo["lon"],
+         "address": body.address, "phone": body.phone, "website": "", "source": "Added by you",
+         "distance_mi": round(sup.haversine_mi((doc["lat"], doc["lon"]), (geo["lat"], geo["lon"])), 1)}
+    await db.supply.update_one({"project_id": pid}, {"$push": {"suppliers": {"$each": [s], "$position": 0}}})
+    return s
+
+
+@api.delete("/projects/{pid}/supply/supplier/{sid}")
+async def supply_remove(pid: str, sid: str):
+    await get_supply(pid)
+    await db.supply.update_one({"project_id": pid}, {"$pull": {"suppliers": {"id": sid}}, "$unset": {f"quotes.{sid}": "", f"estimates.{sid}": ""}})
+    return {"ok": True}
+
+
 app.include_router(api)
 
 
@@ -1043,3 +1251,4 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+

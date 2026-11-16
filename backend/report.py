@@ -8,7 +8,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
-from overlay import fmt_ft
+from overlay import fmt_ft, sfmt
 from reportlab.platypus import (BaseDocTemplate, Frame, PageTemplate, Paragraph, Spacer, Table, TableStyle,
                                 Image, PageBreak, KeepTogether)
 
@@ -211,6 +211,36 @@ def drain_takeoff_section(tk: dict | None) -> list:
             Spacer(1, 4), P("Quantities include waste and are for ordering estimates — confirm on site.", "meta"), PageBreak()]
 
 
+SEV = {"error": "WON'T WORK", "warning": "CHECK", "info": "NOTE"}
+VERDICT = {"works": "Works with the plans", "works_with_changes": "Works with changes", "wont_work": "Won't work as drawn"}
+
+
+def checks_section(rules: list, ai: dict | None) -> list:
+    order = {"error": 0, "warning": 1, "info": 2}
+    errs = sum(1 for i in rules if i["severity"] == "error")
+    flow = [Spacer(1, 10), P("Layout checks", "h3"),
+            P(f"{errs} problem{'s' if errs != 1 else ''} that won't work · {sum(1 for i in rules if i['severity'] == 'warning')} to check · "
+              f"{sum(1 for i in rules if i['severity'] == 'info')} field changes", "meta"), Spacer(1, 4)]
+    if rules:
+        flow.append(simple_table(["Flag", "Item", "Problem", "Why", "Fix"],
+                                 [[SEV[i["severity"]], i["item"], i["problem"], i["why"], i["fix"]] for i in sorted(rules, key=lambda i: order[i["severity"]])],
+                                 [0.8, 0.9, 1.8, 2.1, 1.65], colors.HexColor("#B45309")))
+    else:
+        flow.append(P("All geometry checks pass."))
+    if ai:
+        flow += [P("AI plan check", "h3"),
+                 P(f"{VERDICT.get(ai.get('verdict'), ai.get('verdict') or '')} — {ai.get('summary') or ''}"
+                   + (" (layout changed after this check — re-run it)" if ai.get("stale") else ""), "body")]
+        if ai.get("issues"):
+            flow += [Spacer(1, 4), simple_table(["Flag", "Item", "Problem", "Why (from plans)", "Fix"],
+                                                [[SEV.get(i.get("severity"), "CHECK"), i.get("item"), i.get("problem"), i.get("why"), i.get("fix")]
+                                                 for i in sorted(ai["issues"], key=lambda i: order.get(i.get("severity"), 1))],
+                                                [0.8, 0.9, 1.8, 2.1, 1.65], colors.HexColor("#B45309"))]
+    else:
+        flow.append(P("AI plan check not run — use 'Check against plans' on the drain tile layout page.", "meta"))
+    return flow
+
+
 def drain_layout_section(imgs: list) -> list:
     flow = []
     for label, png, notes, stakes in imgs:
@@ -221,14 +251,21 @@ def drain_layout_section(imgs: list) -> list:
                      P("Zoomed to the foundation. Dashed lines run from each cleanout and sump to its nearest footing corner.", "meta"),
                      Spacer(1, 6), sheet_image(zoom, 8.0), PageBreak()]
         if stakes:
+            rows = stakes["rows"] if isinstance(stakes, dict) else stakes
+            off = lambda v: sfmt(v) if v is not None else "—"  # noqa: E731
             flow += [P(f"Stake-out distances — {label}", "h2"),
-                     P("Straight-line distance from each cleanout and sump to the nearest footing corner (corners C1, C2… are "
-                       "marked on the layout drawing).", "meta"), Spacer(1, 6),
-                     simple_table(["Item", "Type", "Nearest corner", "Distance", "Feet"],
+                     P("Straight-line distance from each cleanout and sump to the nearest footing corner, plus offsets measured along "
+                       "each of the two walls that meet at that corner (corners C1, C2… are marked on the stake-out plan). "
+                       "A minus offset means the item sits behind the corner / outside that wall line.", "meta"), Spacer(1, 6),
+                     simple_table(["Item", "Type", "Corner", "Straight line", "Along wall", "Along wall"],
                                   [[s["label"], s["kind"], f"C{s['corner']}", fmt_ft(s["ft"]) if s["ft"] is not None else "Set tile length",
-                                    f"{s['ft']:.2f}" if s["ft"] is not None else "—"] for s in stakes], [1.6, 1.2, 1.4, 1.6, 1.5], AMBER),
-                     Spacer(1, 4), P("Measure from the outside face of the footing corner. Verify against plans before excavating.", "meta"),
-                     PageBreak()]
+                                    f"{off(s['a_ft'])} toward C{s['a_to']}" if s["a_to"] else "—",
+                                    f"{off(s['b_ft'])} toward C{s['b_to']}" if s["b_to"] else "—"] for s in rows],
+                                  [1.0, 0.85, 0.65, 1.15, 1.8, 1.8], AMBER),
+                     Spacer(1, 4), P("Measure from the outside face of the footing corner. Verify against plans before excavating.", "meta")]
+            if isinstance(stakes, dict):
+                flow += checks_section(stakes["rules"], stakes.get("ai"))
+            flow.append(PageBreak())
     return flow
 
 
@@ -282,7 +319,7 @@ def build_report(project: dict, pages: list, images: dict, brand: dict, logo: by
     imgs = extras.get("drain_images") or []
     if crew == "drainage":
         flow += [Spacer(1, 18), P("In this report", "h3")] + bullets(
-            ["Drain tile layout drawing with stake-out lines"] + (["Stake-out distance table"] if any(i[3] for i in imgs) else [])
+            ["Drain tile layout drawing and zoomed stake-out plan"] + (["Stake-out distances, wall offsets and layout checks"] if any(i[3] for i in imgs) else [])
             + (["Drainage material takeoff"] if extras.get("drain_takeoff") else []) + (["Drainage plan checklist"] if extras.get("drain") else []))
         flow += [PageBreak()] + drain_layout_section(imgs) + drain_takeoff_section(extras.get("drain_takeoff"))
         if extras.get("drain"):

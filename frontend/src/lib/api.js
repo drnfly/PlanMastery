@@ -33,6 +33,8 @@ export const deletePhoto = (pid) => axios.delete(`${API}/photos/${pid}`);
 export const startDrainOverlay = (id, idx) => axios.post(`${API}/projects/${id}/pages/${idx}/drain-overlay`);
 export const editDrainOverlay = (id, idx, body) => axios.put(`${API}/projects/${id}/pages/${idx}/drain-overlay`, body).then((r) => r.data);
 export const getDrainTakeoff = (id, page) => axios.get(`${API}/projects/${id}/drain-takeoff`, { params: page != null ? { page } : {} }).then((r) => r.data);
+export const drainRules = (id, idx, body) => axios.post(`${API}/projects/${id}/pages/${idx}/drain-rules`, body).then((r) => r.data.issues);
+export const startDrainCheck = (id, idx) => axios.post(`${API}/projects/${id}/pages/${idx}/drain-check`);
 export const deleteDrainOverlay = (id, idx) => axios.delete(`${API}/projects/${id}/pages/${idx}/drain-overlay`);
 export const saveDrainTakeoff = (id, pageIndex, params) => axios.put(`${API}/projects/${id}/drain-takeoff`, { page_index: pageIndex, params }).then((r) => r.data);
 export const fetchDrainPng = (id, idx) =>
@@ -83,3 +85,10 @@ export async function streamChat(id, message, pageIndex, scope, { onDelta, onSta
     }
   }
 }
+export const getSupply = (id) => axios.get(`${API}/projects/${id}/supply`).then((r) => r.data);
+export const searchSupply = (id, body) => axios.post(`${API}/projects/${id}/supply/search`, body).then((r) => r.data);
+export const repriceSupply = (id) => axios.post(`${API}/projects/${id}/supply/reprice`);
+export const setSupplyItem = (id, body) => axios.put(`${API}/projects/${id}/supply/item`, body);
+export const setSupplyQuote = (id, body) => axios.put(`${API}/projects/${id}/supply/quote`, body);
+export const addSupplier = (id, body) => axios.post(`${API}/projects/${id}/supply/supplier`, body).then((r) => r.data);
+export const removeSupplier = (id, sid) => axios.delete(`${API}/projects/${id}/supply/supplier/${sid}`);

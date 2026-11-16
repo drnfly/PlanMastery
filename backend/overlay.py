@@ -57,6 +57,7 @@ def sump_text(s: dict, default: str) -> str:
 
 
 STAKE = (180, 83, 9)
+OFFSET = (13, 148, 136)
 
 
 def fmt_ft(f: float) -> str:
@@ -94,24 +95,59 @@ def stakeouts(ov: dict, w: int, h: int) -> list:
             continue
         j = min(range(len(cs)), key=lambda n: math.dist(p, cs[n]))
         px = math.dist(p, cs[j])
-        out.append({"kind": kind, "label": it.get("label") or default, "corner": j + 1, "p": p, "c": cs[j],
-                    "ft": round(px * k, 2) if k else None})
+        row = {"kind": kind, "label": it.get("label") or default, "corner": j + 1, "p": p, "c": cs[j],
+               "ft": round(px * k, 2) if k else None, "a_ft": None, "b_ft": None, "a_to": None, "b_to": None, "foot": None}
+        off = wall_offsets(p, cs, j)
+        if off:
+            a, b, nxt, prv, foot = off
+            row.update({"a_to": nxt + 1, "b_to": prv + 1, "foot": foot,
+                        "a_ft": round(a * k, 2) if k else None, "b_ft": round(b * k, 2) if k else None})
+        out.append(row)
     return out
 
 
+def wall_offsets(p, cs, j):
+    n = len(cs)
+    if n < 3:
+        return None
+    c, nxt, prv = cs[j], (j + 1) % n, (j - 1) % n
+    ux, uy = cs[nxt][0] - c[0], cs[nxt][1] - c[1]
+    L = math.hypot(ux, uy)
+    if not L:
+        return None
+    ux, uy = ux / L, uy / L
+    nx, ny = -uy, ux
+    if nx * (cs[prv][0] - c[0]) + ny * (cs[prv][1] - c[1]) < 0:
+        nx, ny = -nx, -ny
+    dx, dy = p[0] - c[0], p[1] - c[1]
+    a, b = dx * ux + dy * uy, dx * nx + dy * ny
+    return a, b, nxt, prv, (c[0] + ux * a, c[1] + uy * a)
+
+
+def sfmt(f: float) -> str:
+    return ("-" if f < 0 else "") + fmt_ft(abs(f))
+
+
 def _draw_stakes(d, ov, w, h, lw, font):
+    small = ImageFont.load_default(size=max(int(font.size * 0.8), 10))
     for i, c in enumerate(corner_pts(ov)):
         x, y = _pt(c, w, h)
         d.ellipse([x - lw * 1.4, y - lw * 1.4, x + lw * 1.4, y + lw * 1.4], fill=STAKE + (255,), outline=(255, 255, 255, 255), width=2)
         d.text((x + lw * 2, y + lw), f"C{i + 1}", fill=STAKE + (255,), font=font, stroke_width=3, stroke_fill=(255, 255, 255, 255))
     for s in stakeouts(ov, w, h):
+        if s["foot"]:
+            _dashed(d, [s["c"], s["foot"], s["p"]], OFFSET + (230,), max(lw // 3, 1), lw)
+            for a, b, v in ((s["c"], s["foot"], s["a_ft"]), (s["foot"], s["p"], s["b_ft"])):
+                if v is not None and math.dist(a, b) > lw * 6:
+                    d.text(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), sfmt(v), fill=(255, 255, 255, 255), font=small, anchor="mm",
+                           stroke_width=3, stroke_fill=OFFSET + (255,))
         _dashed(d, [s["p"], s["c"]], STAKE + (235,), max(lw // 2, 2), lw * 2)
         if s["ft"] is not None:
             mx, my = (s["p"][0] + s["c"][0]) / 2, (s["p"][1] + s["c"][1]) / 2
             d.text((mx, my), fmt_ft(s["ft"]), fill=(255, 255, 255, 255), font=font, anchor="mm", stroke_width=4, stroke_fill=STAKE + (255,))
 
 
-def _crop(img, ov: dict, margin: float = 0.12):
+def _crop(img, ov: dict, margin: float = 0.18):
     w, h = img.size
     xs, ys = [], []
     for key in ("footprint", "drain_tile"):
@@ -214,7 +250,7 @@ def render_overlay(image: bytes, ov: dict, stake: bool = False, crop: bool = Fal
         _draw_stakes(d, ov, w, h, lw, font)
 
     items = [(TILE, f"Drain tile - {ov.get('pipe_spec') or 'perforated pipe'}" + (f" ({ov['length_ft']} LF)" if ov.get("length_ft") else "")),
-             (DISCHARGE, "Discharge / solid outlet"), (CLEANOUT, "Cleanout"), (SUMP, "Sump / pump (dot = pump)"), (SLOPE, "Slope direction")] + ([(STAKE, "Stake-out: distance to nearest footing corner")] if stake else [])
+             (DISCHARGE, "Discharge / solid outlet"), (CLEANOUT, "Cleanout"), (SUMP, "Sump / pump (dot = pump)"), (SLOPE, "Slope direction")] + ([(STAKE, "Stake-out: straight line to nearest footing corner"), (OFFSET, "Offsets along each wall from that corner")] if stake else [])
     pad, row = lw * 3, int(font.size * 1.6)
     box_w = int(max(d.textlength(t, font=font) for _, t in items) + pad * 4 + row)
     box_h = row * len(items) + pad * 2
