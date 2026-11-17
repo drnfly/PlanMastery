@@ -12,15 +12,16 @@ const order = { error: 0, warning: 1, info: 2 };
 const Issue = ({ f, onPick, testid }) => {
   const s = SEV[f.severity] || SEV.warning;
   const Icon = s.icon;
+  const Tag = onPick ? "button" : "div";
   return (
-    <button data-testid={testid} onClick={() => onPick(f)} className="w-full text-left flex gap-2 rounded-md p-2 hover:bg-slate-800/60 transition-colors border border-slate-800">
+    <Tag data-testid={testid} onClick={onPick ? () => onPick(f) : undefined} className={`w-full text-left flex gap-2 rounded-md p-2 border border-slate-800 ${onPick ? "hover:bg-slate-800/60 transition-colors" : ""}`}>
       <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${s.cls}`} />
       <span className="min-w-0">
         <span className="block text-slate-200"><span className={`font-mono text-[10px] uppercase mr-1.5 ${s.cls}`}>{s.tag}</span>{f.item} — {f.problem}</span>
         {f.why && <span className="block text-slate-500 mt-0.5">Why: {f.why}</span>}
         {f.fix && <span className="block text-cyan-300/90 mt-0.5">Fix: {f.fix}</span>}
       </span>
-    </button>
+    </Tag>
   );
 };
 
@@ -43,7 +44,7 @@ const AiCheck = ({ check, stale, dirty, onRun }) => {
         <>
           <p data-testid="layout-ai-verdict"><span className={`font-semibold ${cls}`}>{label}</span> <span className="text-slate-400">{res.summary}</span></p>
           {stale && <p className="text-amber-300" data-testid="layout-ai-check-stale">Layout changed since this check — re-run it.</p>}
-          {(res.issues || []).map((f, n) => <Issue key={n} f={f} onPick={() => {}} testid={`layout-ai-issue-${n}`} />)}
+          {(res.issues || []).map((f, n) => <Issue key={n} f={f} testid={`layout-ai-issue-${n}`} />)}
         </>
       )}
     </div>

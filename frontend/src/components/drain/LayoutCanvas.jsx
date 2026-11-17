@@ -210,11 +210,11 @@ export const LayoutCanvas = ({ d, aspect, on, tool, sel, setSel, onAdd, onMove, 
           </g>
         ))}
         {on.stake && <Stakes d={d} rows={stakes || []} aspect={aspect} sel={sel} offsets={on.offsets} />}
+        {on.foot && tool === "select" && midHandles("footprint", C.foot)}
+        {on.foot && vertexHandles("footprint", "foot", C.foot)}
         {on.tile && midHandles("drain_tile", C.tile)}
         {on.tile && on.measure && <Measures d={d} k={k} aspect={aspect} active={activeSegs} />}
         {on.tile && vertexHandles("drain_tile", "tile", C.tile)}
-        {on.foot && tool === "select" && midHandles("footprint", C.foot)}
-        {on.foot && vertexHandles("footprint", "foot", C.foot)}
         {on.sump && dis.slice(1).map((p, j) => (
           <g key={`dp-${j}`} data-testid={`layout-dpt-${j + 1}`} onPointerDown={grab({ kind: "dpt", v: j + 1 })} {...h}>
             {ring(p[0], p[1], 16, C.discharge, is("dpt", undefined, j + 1))}

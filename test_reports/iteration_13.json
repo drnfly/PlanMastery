@@ -1,0 +1,51 @@
+{
+  "summary": "Tested both new features. Corner offsets and the 'Will this layout work?' checks (A1-A5) all work: offsets show in the side list, on the drawing and in the PDF, the rule checks update live, the AI plan check finished in about 30 s, and staleness is detected. The supplier map and price comparison (B1-B6) work: Leaflet/OSM map, filters, quotes, qty and include toggles, compare columns, add/remove supplier, a new Dayton search finished in about 2.5 min, the bad address gives a 404 toast, and there is no horizontal overflow at 390px mobile. Backend pytest: 18/19 passed. The one failure is a real bug: only the first 30 suppliers get AI prices. Main problems: 1) Supplier categorization picks up non-suppliers (an ice-cream shop, a spa and condos show up as stone/landscape yards). 2) The 'CHEAPEST FIRST' list is not sorted cheapest first. 3) Suppliers past #30 are never priced.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "supply.categorize / find_suppliers (POST /api/projects/{pid}/supply/search)", "issue": "Name regex 'stone|sand|...' wrongly puts non-suppliers in 'landscape'. The Dayton, OH search returned 'Cold Stone Creamery' x2 (ice cream), 'Hand & Stone' (massage spa) and 'Stone Ridge Condominiums' as Stone/landscape supply. They are shown on the map, listed, and used as compare columns. The AI notes even mention 'ice cream and spas'. Fix: when only the name matches, require a shop/craft/landuse tag, and add creamery|massage|spa|condo|apartment|ice cream|restaurant to SKIP.", "priority": "HIGH"},
+      {"endpoint": "supply.estimate_prices", "issue": "Only the first 30 suppliers (suppliers[:30]) are sent to the AI, but find_suppliers keeps up to 50 plus custom ones. In the Columbus project, 13 of 43 suppliers (Oakland Nursery, Zettler Hardware, Cellar Lumber, Home Depot Garden Center...) never get any price. Price in batches or limit the list to what gets priced.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/projects/{pid}/supply/supplier", "issue": "sup.geocode() is not wrapped in try/except here, unlike /supply/search. A Nominatim timeout or 429 gives a 500 instead of a 502 with a message. A newly added supplier is also never priced until the user clicks Re-estimate (row shows 'not priced')."},
+      {"endpoint": "POST /api/projects/{pid}/supply/search", "issue": "Nothing stops a second search while status=='searching'. The UI 'Search again' button is enabled during the 1-2 min background search, so two run_supply_search tasks can race and overwrite each other. Return 409 like reprice does, or disable the button while pending."},
+      {"endpoint": "run_supply_search", "issue": "Only find_suppliers is inside the try. An exception in drain_takeoff_for or build_items leaves status stuck at 'searching' and the UI polls forever."},
+      {"endpoint": "DELETE /api/projects/{pid}/supply/supplier/{sid}", "issue": "Returns 200 for an unknown sid (no 404)."},
+      {"endpoint": "drain_rules.check_layout", "issue": "A tile point deep inside the footing gets both an error ('Tile point 5 runs inside the footing') and a contradictory warning ('sits more than 4 ft from the footing'), which also draws two flag rings with the same testid layout-flag-tile-4. Skip inside points in the 'far' check."},
+      {"endpoint": "drain_rules._moves", "issue": "'Moved X' and 'Added on site' info never appear on layouts with manual=true. Project eb4fb34f page 0 is manual even though it has ai_original, so on the project the user is using, adding a cleanout shows no 'Added on site' flag. Verified working on c5675b5d page 4 (AI layout)."},
+      {"endpoint": "Data note", "issue": "The review said an AI check result already existed for eb4fb34f page 0, but no page in the DB had drain_check set. Ran the AI check on c5675b5d page 4 instead (verdict 'Won't work as drawn', 5 issues, ~30 s)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "SupplyPage supplier list", "issue": "Header says 'CHEAPEST FIRST', but the sort is by number of priced items, then total. In Dayton, Home Depot at $11,814 is listed above United Building Materials at $8,724. Either sort by total or relabel ('Most items priced').", "selector": "[data-testid=supplier-list]", "priority": "MEDIUM"},
+      {"component": "LayoutChecks AI issues", "issue": "AI issues (layout-ai-issue-n) look like clickable buttons with a hover style, but onPick is a no-op, so clicking does nothing (rule issues do select the item).", "selector": "[data-testid^=layout-ai-issue-]", "priority": "LOW"},
+      {"component": "LayoutCanvas handles", "issue": "When a footprint vertex sits near a tile vertex, the footprint handle is on top and grabs the drag. Dragging at layout-tile-v-4 moved footprint point 7 instead. Users have to hide the 'Footing outline' layer first.", "selector": "[data-testid=layout-tile-v-4]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Supplier search (Dayton, 10 mi)", "issue": "The Nominatim fallback found 0 equipment rental shops, so equipment is priced only at home centers. Every home center of every chain gets the same AI total ($3,679.99 in Columbus, $11,814.36 in Dayton), so the comparison between chains means little.", "affected_selectors": ["[data-testid^=supplier-total-]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iter13_layout_checks_supply.py", "/app/test_reports/pytest/iter13.xml"],
+  "action_items": [
+    "Tighten supply.categorize: stop non-suppliers (Cold Stone Creamery, Hand & Stone spa, condos) being classed as landscape yards",
+    "Price every supplier (batch estimate_prices past 30) or limit the stored list to what gets priced",
+    "Fix the 'CHEAPEST FIRST' sort/label in SupplyPage",
+    "Disable 'Search again' or return 409 while a search is running; wrap all of run_supply_search in try/except",
+    "Wrap geocode in POST /supply/supplier in try/except (return 502)",
+    "check_layout: don't add the '>4 ft from footing' warning for points already flagged inside the footing",
+    "Decide whether 'Moved/Added on site' should work when the layout is manual but has ai_original (eb4fb34f)",
+    "Make AI issues selectable, or drop the button/hover style"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1255 lines; move the supply endpoints and drain-rules/check into routers",
+    "estimate_prices sends one prompt for 30 suppliers x 24 items; chains get identical prices. Consider pricing per chain/category, then mapping to branches",
+    "Item keys dr_{n} depend on the order of takeoff lines, so after the takeoff changes, preserved 'edited' qty and quotes can attach to the wrong item"
+  ],
+  "updated_files": ["/app/backend/tests/test_iter13_layout_checks_supply.py"],
+  "success_rate": {"backend": "95% (18/19)", "frontend": "~92% (all requested flows work; 3 UI/logic issues)"},
+  "seed_data_creation": "Created and then removed supplier TEST_Yard (pytest) and TEST_Stone Yard (UI) on eb4fb34f. A quote set on Lowe's dr_0 was cleared. eq_dumpster/eq_excavator qty/on were restored to their original values, but their 'edited' flag is now true. On c5675b5d, as requested: Dayton OH 10 mi supplier search (29 suppliers) and an AI drain_check on page 4. No layout was saved on any project (all edits discarded).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "eb4fb34f page 0 is a manual layout (manual=true): rule checks work, but no 'Moved/Added' info. c5675b5d page 4 is an AI layout with a drain_check result (good for staleness tests). Supplier data: eb4fb34f = Columbus 15 mi, 43 suppliers, 30 priced; c5675b5d = Dayton 10 mi, 29 suppliers. Run pytest without -p no:xdist (pytest.ini uses -n). Use pymupdf, not pypdf, for PDFs. Tile vertex drags: hide the foot/cleanouts/sump layers first, or the handles overlap."
+}

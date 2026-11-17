@@ -43,7 +43,7 @@ def _issue(sev, item, problem, why, fix, kind=None, i=None):
 
 def _moves(ov, k, w, h):
     orig = ov.get("ai_original")
-    if not orig or ov.get("manual") or not k:
+    if not orig or not k:
         return []
     out = []
     pairs = [("cleanout", i, c, "CO", orig.get("cleanouts") or []) for i, c in enumerate(ov.get("cleanouts") or [])]
@@ -90,7 +90,7 @@ def check_layout(ov: dict, w: int, h: int, k: float | None = None) -> list:
                               "Footing drain tile must sit outside the footing (beside or below it), not under the slab.", "Drag those points outside the footing line.",
                               "tile", inside[0] - 1))
         if ft:
-            far = [n + 1 for n, p in enumerate(tile) if ft(_line_dist(p, perim)) > 4]
+            far = [n + 1 for n, p in enumerate(tile) if n + 1 not in inside and ft(_line_dist(p, perim)) > 4]
             if far:
                 out.append(_issue("warning", "Drain tile", f"Tile point{'s' if len(far) > 1 else ''} {', '.join(map(str, far[:6]))} {'sit' if len(far) > 1 else 'sits'} more than 4 ft from the footing",
                                   "Tile away from the footing won't relieve water pressure at the footing/wall joint.", "Keep the tile tight to the footing, inside the stone bed.",
